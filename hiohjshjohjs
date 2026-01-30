@@ -1,0 +1,17 @@
+[33mcommit 2575dc62aff8c2cdfa0fa6cbc16b9156062c571c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author: Sammy Ndzelen <nsammyy@yahoo.com>
+Date:   Fri Jan 30 15:17:49 2026 +0100
+
+    Add test.py with test function
+
+[33mcommit 5927e03655940630293d279beaea88f1132741a0[m
+Author: Sammy Ndzelen <nsammyy@yahoo.com>
+Date:   Fri Jan 30 15:16:13 2026 +0100
+
+    Add sercive.py with get_data function
+
+[33mcommit f1dd72477ce699a027b94506e7b47ffb2c7cc7f6[m
+Author: ndzelenla <nsammyy@yahoo.com>
+Date:   Fri Jan 30 15:09:09 2026 +0100
+
+    Add index.py file
