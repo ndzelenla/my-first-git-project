@@ -1,0 +1,269 @@
+## What problems do relational databases solve?
+
+## Document the key problems that relational databases address
+- they adress data Integrity and Consistency
+- duplication and data redundancy
+- relationship Management of data
+- Data security and Access Control
+- scalability of data structures
+
+## Explain why structured data storage matters
+- for predictability and reliability
+- for data Quality enforcements and efficient storage Retrieval
+
+## Provide examples of use cases
+- financial Systems
+- E-Commerce platforms
+- HealthCare Systems
+
+## What makes data "relational"?
+
+## Explain the concept of relationships between tables
+- data is said to be relational when it is organized into tables (Relations) that can be connected via common values,
+- enabling the database to model real-world relationships mathematically
+
+## Describe how data is organized in a relational model
+- A relation is a set of tuples (rows) with attributes (columns),each table represents one "entity type" 
+
+## Give examples of related data
+- Hospital System
+- social media platform
+
+## Why SQL is still widely used?
+
+## Explain SQL's continued relevance
+- unmatched ecosystem Integration
+- declarative power and Performance at scale
+
+## Discuss its role in modern data Engineering
+- modern data stack Integration, the ELT Revolution and Streaming SQL
+
+## Compare SQL to other data access methods
+- Aspect	   SQL	             NoSQL APIs	              ORM Frameworks	            GraphQL
+- Query Pattern	Declarative	    Imperative	           Object-oriented            	 Declarative
+- Schema	Rigid, upfront	    Flexible, dynamic	   Object mapping	         Client-defined
+- Relationships	Native JOINs	    Manual linking	    Automated mapping	        Nested queries
+- Learning Curve   Moderate	      Low per DB	   High (language+ORM)	        Moderate
+- Performance	Optimized by DB	     Varies widely	     Often inefficient	        Over/under-fetching
+- Standardization High (ANSI)   Vendor-specific	   Framework-specific	        Specification
+- Analytics	    Excellent	        Poor	                  Poor	                     Poor
+
+## Step 2
+CREATE TABLE customers (
+    customer_id INT PRIMARY KEY AUTO_INCREMENT,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    phone VARCHAR(20),
+    address VARCHAR(200),
+    city VARCHAR(50),
+    state VARCHAR(2),
+    zip_code VARCHAR(10),
+    country VARCHAR(50) DEFAULT 'USA',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+- Represents: Individual or business customers who can place orders
+
+CREATE TABLE orders (
+    order_id INT PRIMARY KEY AUTO_INCREMENT,
+    customer_id INT NOT NULL,
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    order_status VARCHAR(20) DEFAULT 'pending' 
+        CHECK (order_status IN ('pending', 'processing', 'shipped', 'delivered', 'cancelled')),
+    total_amount DECIMAL(10,2) DEFAULT 0.00 CHECK (total_amount >= 0),
+    shipping_address VARCHAR(200),
+    shipping_city VARCHAR(50),
+    shipping_state VARCHAR(2),
+    shipping_zip VARCHAR(10),
+    shipping_method VARCHAR(30),
+    shipping_cost DECIMAL(6,2) DEFAULT 0.00,
+    tax_amount DECIMAL(6,2) DEFAULT 0.00,
+    payment_method VARCHAR(30),
+    payment_status VARCHAR(20) DEFAULT 'pending'
+        CHECK (payment_status IN ('pending', 'authorized', 'paid', 'refunded')),
+    notes TEXT,
+    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
+);
+
+-- Represents: Complete order Transactions
+
+## 2
+-- Primary Key: customer_id
+## Why appropriate:
+- Guaranteed uniqueness: Database generates sequential IDs
+- Stability: Never changes (vs. email/phone which can change)
+-- Privacy: Doesn't expose personal data in URLs or logs
+- Business independence: Not tied to external systems
+- Simplicity: Single-column key, easy to reference
+
+-- Primary Key: order_id
+## Why appropriate:
+- Sequential generation: Naturally orders by creation time
+- Multiple systems: External order IDs (Shopify, eBay) can be stored separately
+- Audit trail: Sequential IDs help identify missing/gapped orders
+
+## 3 & 4 together
+- Relationship: One customer → Many orders (1:N)
+- Connection: orders.customer_id → customers.customer_id
+- Business Logic: Every order must be placed by a valid customer
+
+## Step 3
+# 1
+- INNER JOIN
+- What it does - used to find only matching rows between two tables 
+- When to use it- get orders with customer details
+- What data it Returns - only matching rows from both, no nulls in the join columns
+- Use diagrams or clear explanations
+- BEFORE JOIN:
+Customers:                  Orders:
++-----+--------+           +-----+------------+
+| id  | name   |           | id  | customer_id|
++-----+--------+           +-----+------------+
+| 1   | Alice  |           | 101 | 2          |
+| 2   | Bob    |           | 102 | 3          |
+| 3   | Carol  |           | 103 | 2          |
+| 4   | David  |           +-----+------------+
+
+AFTER INNER JOIN on customers.id = orders.customer_id:
+
+RESULT SET:
++-----+--------+-----+------------+
+| id  | name   | id  | customer_id|
++-----+--------+-----+------------+
+| 2   | Bob    | 101 | 2          |
+| 3   | Carol  | 102 | 3          |
+| 2   | Bob    | 103 | 2          |
++-----+--------+-----+------------+
+
+- Notice:
+- Alice (id 1) not in result (no orders)
+- David (id 4) not in result (no orders)
+- Bob appears TWICE (has two orders)
+- Column names duplicate - need aliases in practice
+
+# 2
+- LEFT JOIN
+
+- What it does - Returns all records from the left table
+- When to use it - Scenario: List all Customers with their Orders (Including those with no Orders)
+- What data it Returns - ALL rows from left table (whether they match or not), Matching rows from right table (when join condition is met) and NULLs for right table columns when no match exists
+- How it differs from INNER JOIN - 
+- Use diagrams or clear explanations
+--Question: "Do I want to include rows from the main table even if they have no matches?"
+--YES → Use LEFT JOIN
+    ↓
+"Show me ALL customers, even if they never ordered"
+
+NO → Use INNER JOIN  
+    ↓
+"Show me ONLY customers who have placed orders"
+
+# 3
+-- Why joins are powerful but risky
+- Explain the power of joins - unifying fragmented data to get the complete picture
+- Discuss potential risks (performance, data quality, complexity) - the catersian product Explosion is one Risk, silent data corruption and unmaintainable queries that joins could create
+- Provide examples of when joins can cause Problems - Healthcare System Patient Record Corruption
+- Deliverable: Create explanations with diagrams or clear text descriptions.
+-- Disaster:
+-15% of patients duplicated (different SSN formats)
+-Medication allergies NOT merged (lost in JOIN logic)
+-Critical patients missed in migration
+-Emergency room doctors lacked complete histories
+
+# 4
+- OLTP systems
+
+- What OLTP means - OLTP stands for online Transaction processing and are Systems designed to manage day to day Transaction oriented operations.
+- How SQL supports transactional Systems - ACID Transactions, handling simultaneous users, data Integrity enforcementd and index optimization for fast lookups
+- Examples of OLTP use cases - Airline Reservation System
+
+# Reporting
+
+- How SQL is used for reporting - SQL turns raw operational data into actionable business intelligence through data Aggregation, Transformation and analysis
+- What types of queries support reporting - Aggregation queries, time series Analysis and Multi dimentional analysis
+- Examples of reporting use cases - executive Dashboard, Sales Performance Report
+
+# Analytics
+
+- How SQL supports Analytics - SQL transforms a Transaction processor to an analytical engine via advanced fucntions, window operations and complex aggregations
+- What analytical queries look like - 
+-- Advanced customer behavior analysis with multiple window functions and - Examples of an analytical use case
+WITH customer_transactions AS (
+    SELECT 
+        customer_id,
+        order_date,
+        total_amount,
+        -- Running totals
+        SUM(total_amount) OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS running_total,
+        -- Moving averages (30-day, 90-day)
+        AVG(total_amount) OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date 
+            RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW
+        ) AS avg_30day,
+        -- Percent of total per customer
+        total_amount * 100.0 / SUM(total_amount) OVER (
+            PARTITION BY customer_id
+        ) AS pct_of_customer_total,
+        -- Sequence patterns (days between orders)
+        LAG(order_date) OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date
+        ) AS previous_order_date,
+        EXTRACT(DAY FROM order_date - LAG(order_date) OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date
+        )) AS days_since_last_order,
+        -- Order rank within customer
+        ROW_NUMBER() OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date
+        ) AS order_sequence,
+        -- Monetary decile across all customers
+        NTILE(10) OVER (
+            ORDER BY total_amount DESC
+        ) AS amount_decile
+    FROM orders
+    WHERE order_date >= '2023-01-01'
+)
+SELECT 
+    customer_id,
+    order_date,
+    total_amount,
+    running_total,
+    avg_30day,
+    ROUND(pct_of_customer_total, 2) AS pct_of_customer_total,
+    days_since_last_order,
+    order_sequence,
+    amount_decile,
+    -- Customer lifecycle stage based on sequence
+    CASE 
+        WHEN order_sequence = 1 THEN 'First-time Buyer'
+        WHEN order_sequence BETWEEN 2 AND 5 THEN 'Early-stage'
+        WHEN order_sequence BETWEEN 6 AND 20 THEN 'Growth-stage'
+        WHEN order_sequence > 20 THEN 'Mature'
+    END AS customer_lifecycle_stage,
+    -- Purchase frequency category
+    CASE 
+        WHEN days_since_last_order IS NULL THEN 'New'
+        WHEN days_since_last_order <= 7 THEN 'Hyper-active'
+        WHEN days_since_last_order <= 30 THEN 'Active'
+        WHEN days_since_last_order <= 90 THEN 'Dormant'
+        ELSE 'At-risk'
+    END AS engagement_level
+FROM customer_transactions
+ORDER BY customer_id, order_date;
+
+# 4
+- Data warehouses
+
+- How SQL is used in data warehouses - as a unified query language for analyzing historical and integrated data from multiple sources
+- What makes warehouse queries different - columnar storage, dimensional modelling, distributed query execution and materialized views and aggregations
+- Examples of warehouse use cases - time travel and historical Analysis, Enterprise BI, customer 360 analytics
+
