@@ -1,0 +1,510 @@
+## What problems do relational databases solve?
+
+## Document the key problems that relational databases address
+- they adress data Integrity and Consistency
+- duplication and data redundancy
+- relationship Management of data
+- Data security and Access Control
+- scalability of data structures
+
+## Explain why structured data storage matters
+- for predictability and reliability
+- for data Quality enforcements and efficient storage Retrieval
+
+## Provide examples of use cases
+- financial Systems
+- E-Commerce platforms
+- HealthCare Systems
+
+## What makes data "relational"?
+
+## Explain the concept of relationships between tables
+- data is said to be relational when it is organized into tables (Relations) that can be connected via common values,
+- enabling the database to model real-world relationships mathematically
+
+## Describe how data is organized in a relational model
+- A relation is a set of tuples (rows) with attributes (columns),each table represents one "entity type" 
+
+## Give examples of related data
+- Hospital System
+- social media platform
+
+## Why SQL is still widely used?
+
+## Explain SQL's continued relevance
+- unmatched ecosystem Integration
+- declarative power and Performance at scale
+
+## Discuss its role in modern data Engineering
+- modern data stack Integration, the ELT Revolution and Streaming SQL
+
+## Compare SQL to other data access methods
+- Aspect	   SQL	             NoSQL APIs	              ORM Frameworks	            GraphQL
+- Query Pattern	Declarative	    Imperative	           Object-oriented            	 Declarative
+- Schema	Rigid, upfront	    Flexible, dynamic	   Object mapping	         Client-defined
+- Relationships	Native JOINs	    Manual linking	    Automated mapping	        Nested queries
+- Learning Curve   Moderate	      Low per DB	   High (language+ORM)	        Moderate
+- Performance	Optimized by DB	     Varies widely	     Often inefficient	        Over/under-fetching
+- Standardization High (ANSI)   Vendor-specific	   Framework-specific	        Specification
+- Analytics	    Excellent	        Poor	                  Poor	                     Poor
+
+## Step 2
+CREATE TABLE customers (
+    customer_id INT PRIMARY KEY AUTO_INCREMENT,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    phone VARCHAR(20),
+    address VARCHAR(200),
+    city VARCHAR(50),
+    state VARCHAR(2),
+    zip_code VARCHAR(10),
+    country VARCHAR(50) DEFAULT 'USA',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+- Represents: Individual or business customers who can place orders
+
+CREATE TABLE orders (
+    order_id INT PRIMARY KEY AUTO_INCREMENT,
+    customer_id INT NOT NULL,
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    order_status VARCHAR(20) DEFAULT 'pending' 
+        CHECK (order_status IN ('pending', 'processing', 'shipped', 'delivered', 'cancelled')),
+    total_amount DECIMAL(10,2) DEFAULT 0.00 CHECK (total_amount >= 0),
+    shipping_address VARCHAR(200),
+    shipping_city VARCHAR(50),
+    shipping_state VARCHAR(2),
+    shipping_zip VARCHAR(10),
+    shipping_method VARCHAR(30),
+    shipping_cost DECIMAL(6,2) DEFAULT 0.00,
+    tax_amount DECIMAL(6,2) DEFAULT 0.00,
+    payment_method VARCHAR(30),
+    payment_status VARCHAR(20) DEFAULT 'pending'
+        CHECK (payment_status IN ('pending', 'authorized', 'paid', 'refunded')),
+    notes TEXT,
+    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
+);
+
+-- Represents: Complete order Transactions
+
+## 2
+-- Primary Key: customer_id
+## Why appropriate:
+- Guaranteed uniqueness: Database generates sequential IDs
+- Stability: Never changes (vs. email/phone which can change)
+-- Privacy: Doesn't expose personal data in URLs or logs
+- Business independence: Not tied to external systems
+- Simplicity: Single-column key, easy to reference
+
+-- Primary Key: order_id
+## Why appropriate:
+- Sequential generation: Naturally orders by creation time
+- Multiple systems: External order IDs (Shopify, eBay) can be stored separately
+- Audit trail: Sequential IDs help identify missing/gapped orders
+
+## 3 & 4 together
+- Relationship: One customer → Many orders (1:N)
+- Connection: orders.customer_id → customers.customer_id
+- Business Logic: Every order must be placed by a valid customer
+
+## Step 3
+# 1
+- INNER JOIN
+- What it does - used to find only matching rows between two tables 
+- When to use it- get orders with customer details
+- What data it Returns - only matching rows from both, no nulls in the join columns
+- Use diagrams or clear explanations
+- BEFORE JOIN:
+Customers:                  Orders:
++-----+--------+           +-----+------------+
+| id  | name   |           | id  | customer_id|
++-----+--------+           +-----+------------+
+| 1   | Alice  |           | 101 | 2          |
+| 2   | Bob    |           | 102 | 3          |
+| 3   | Carol  |           | 103 | 2          |
+| 4   | David  |           +-----+------------+
+
+AFTER INNER JOIN on customers.id = orders.customer_id:
+
+RESULT SET:
++-----+--------+-----+------------+
+| id  | name   | id  | customer_id|
++-----+--------+-----+------------+
+| 2   | Bob    | 101 | 2          |
+| 3   | Carol  | 102 | 3          |
+| 2   | Bob    | 103 | 2          |
++-----+--------+-----+------------+
+
+- Notice:
+- Alice (id 1) not in result (no orders)
+- David (id 4) not in result (no orders)
+- Bob appears TWICE (has two orders)
+- Column names duplicate - need aliases in practice
+
+# 2
+- LEFT JOIN
+
+- What it does - Returns all records from the left table
+- When to use it - Scenario: List all Customers with their Orders (Including those with no Orders)
+- What data it Returns - ALL rows from left table (whether they match or not), Matching rows from right table (when join condition is met) and NULLs for right table columns when no match exists
+- How it differs from INNER JOIN - 
+- Use diagrams or clear explanations
+--Question: "Do I want to include rows from the main table even if they have no matches?"
+--YES → Use LEFT JOIN
+    ↓
+"Show me ALL customers, even if they never ordered"
+
+NO → Use INNER JOIN  
+    ↓
+"Show me ONLY customers who have placed orders"
+
+# 3
+-- Why joins are powerful but risky
+- Explain the power of joins - unifying fragmented data to get the complete picture
+- Discuss potential risks (performance, data quality, complexity) - the catersian product Explosion is one Risk, silent data corruption and unmaintainable queries that joins could create
+- Provide examples of when joins can cause Problems - Healthcare System Patient Record Corruption
+- Deliverable: Create explanations with diagrams or clear text descriptions.
+-- Disaster:
+-15% of patients duplicated (different SSN formats)
+-Medication allergies NOT merged (lost in JOIN logic)
+-Critical patients missed in migration
+-Emergency room doctors lacked complete histories
+
+# 4
+- OLTP systems
+
+- What OLTP means - OLTP stands for online Transaction processing and are Systems designed to manage day to day Transaction oriented operations.
+- How SQL supports transactional Systems - ACID Transactions, handling simultaneous users, data Integrity enforcementd and index optimization for fast lookups
+- Examples of OLTP use cases - Airline Reservation System
+
+# Reporting
+
+- How SQL is used for reporting - SQL turns raw operational data into actionable business intelligence through data Aggregation, Transformation and analysis
+- What types of queries support reporting - Aggregation queries, time series Analysis and Multi dimentional analysis
+- Examples of reporting use cases - executive Dashboard, Sales Performance Report
+
+# Analytics
+
+- How SQL supports Analytics - SQL transforms a Transaction processor to an analytical engine via advanced fucntions, window operations and complex aggregations
+- What analytical queries look like - 
+-- Advanced customer behavior analysis with multiple window functions and - Examples of an analytical use case
+WITH customer_transactions AS (
+    SELECT 
+        customer_id,
+        order_date,
+        total_amount,
+        -- Running totals
+        SUM(total_amount) OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS running_total,
+        -- Moving averages (30-day, 90-day)
+        AVG(total_amount) OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date 
+            RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW
+        ) AS avg_30day,
+        -- Percent of total per customer
+        total_amount * 100.0 / SUM(total_amount) OVER (
+            PARTITION BY customer_id
+        ) AS pct_of_customer_total,
+        -- Sequence patterns (days between orders)
+        LAG(order_date) OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date
+        ) AS previous_order_date,
+        EXTRACT(DAY FROM order_date - LAG(order_date) OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date
+        )) AS days_since_last_order,
+        -- Order rank within customer
+        ROW_NUMBER() OVER (
+            PARTITION BY customer_id 
+            ORDER BY order_date
+        ) AS order_sequence,
+        -- Monetary decile across all customers
+        NTILE(10) OVER (
+            ORDER BY total_amount DESC
+        ) AS amount_decile
+    FROM orders
+    WHERE order_date >= '2023-01-01'
+)
+SELECT 
+    customer_id,
+    order_date,
+    total_amount,
+    running_total,
+    avg_30day,
+    ROUND(pct_of_customer_total, 2) AS pct_of_customer_total,
+    days_since_last_order,
+    order_sequence,
+    amount_decile,
+    -- Customer lifecycle stage based on sequence
+    CASE 
+        WHEN order_sequence = 1 THEN 'First-time Buyer'
+        WHEN order_sequence BETWEEN 2 AND 5 THEN 'Early-stage'
+        WHEN order_sequence BETWEEN 6 AND 20 THEN 'Growth-stage'
+        WHEN order_sequence > 20 THEN 'Mature'
+    END AS customer_lifecycle_stage,
+    -- Purchase frequency category
+    CASE 
+        WHEN days_since_last_order IS NULL THEN 'New'
+        WHEN days_since_last_order <= 7 THEN 'Hyper-active'
+        WHEN days_since_last_order <= 30 THEN 'Active'
+        WHEN days_since_last_order <= 90 THEN 'Dormant'
+        ELSE 'At-risk'
+    END AS engagement_level
+FROM customer_transactions
+ORDER BY customer_id, order_date;
+
+# 4
+- Data warehouses
+
+- How SQL is used in data warehouses - as a unified query language for analyzing historical and integrated data from multiple sources
+- What makes warehouse queries different - columnar storage, dimensional modelling, distributed query execution and materialized views and aggregations
+- Examples of warehouse use cases - time travel and historical Analysis, Enterprise BI, customer 360 Analytics
+
+#######################################################################################################################################################################################
+### M6.02 RDBMS vs NoSQL Decision Analysis
+#######################################################################################################################################################################################
+
+## Document stores
+
+- What they are - they are Nosql databases that store data as flexible, self describing documents (typically in json, sml or yaml)
+- Key characteristics - Schema flexibility, self contained, horizontal scalability and replication
+- Use cases - Content Management Systems, real time applications and IOT applications
+- Examples (MongoDB, CouchDB)
+
+## Key-Value stores
+
+- What they are - they are Nosql databases that store data as siimple key value pairs, where the key is a unique identifier and the value is the data itself
+- Key characteristics - extremely simple (get/set/put/delete), fast oerformance, not just in memory and scaling is horizontal
+- Use cases - accelerating applications, stateless applications and real time features
+- Examples (Redis, DynamoDB)
+
+## Wide-column databases
+
+- What they are - a NoSQL database that stores data in tables, rows, and dynamic columns, but organizes data by column families rather than by row. 
+-It is designed to handle massive amounts of data across distributed systems, offering high performance and scalability for both reads and writes.
+- Key characteristics - Column family storage, dynamic schema,horizontal scalability, high write throughput, compression friendly, No joins
+- Use cases - Time series data, content management, event logging
+- Examples (Cassandra, HBase)
+
+# Graph databases
+
+- What they are - A graph database is a type of NoSQL database that uses graph structures to represent and store data. Instead of tables or documents, 
+- it models data as nodes (entities), relationships (connections between entities), and properties (attributes) 
+- Key characteristics - schema optional, ACID compliance, real time relationship queries
+- Use cases - social network, fraud detection, knowledge graphs, recommendation engines
+- Examples (Neo4j, Amazon Neptune, Arango DB)
+
+## ACID properties with examples
+
+- Atomicity: What it means, provide an example -ensures a transaction is treated as a single, indivisible piece of work. Either all operations complete successfully or none do. e.g bank transfer
+- Consistency: What it means, provide an example -ensures that a transaction brings the database from one valid state to another valid state, maintaining all predifined rules and constraints. e.g inventory management
+- Isolation: What it means, provide an example -ensures that concurrent transactions execute indipendently without interfering with each other.e.g concurrent bank transfers
+- Durability: What it means, provide an example -ensures that once a transaction is committed, its changes are permanent and will persist any subsequent system failure . e.g order confirmation
+- When ACID is critical - in financial systems, healthcare systems, government and legal
+
+##BASE properties with examples
+
+- Basically Available: What it means, provide an example - BASE is an alternative database design philosophy that prioritizes availability and scalability over immediate consistency. e.g social media platform
+- Soft state: What it means, provide an example - The state of the system may change over time without any input, due to eventual consistency and background replication processes. e.g shopping card
+- Eventual consistency: What it means, provide an example - Given enough time without new updates, all replicas will eventually converge to the same state e.g youtube like counts
+- When BASE is acceptable - social media and content platforms, content delivery and caching, analytics and monitoring
+
+## Why BASE is acceptable in some systems
+
+- Explain scenarios where eventual consistency is fine - social media interations because users don't need to see the exact counts immediately and even when the counts are off temporaly by 1 or 2, there is no real harm
+- Discuss trade-offs between ACID and BASE -
+STRONG CONSISTENCY ←--------------------------→ HIGH AVAILABILITY
+     (ACID)                                          (BASE)
+       |                                                |
+  • Bank transactions                            • Social media likes
+  • Inventory management                        • Product recommendations  
+  • Flight bookings                             • Comments/feeds
+  • Always correct                              • Always available
+  • Potentially slower                          • Potentially stale
+  • Harder to scale                            • Easier to scale
+- Provide examples of systems that use BASE - amazon shopping, facebook/instagram, youtube
+
+## 3
+
+## **1. Consistency**
+
+| Aspect | RDBMS | NoSQL | Trade-offs |
+|--------|-------|-------|------------|
+| **Approach** | Strong, immediate consistency (ACID) | Varies: eventual to strong consistency | **RDBMS**: Guaranteed correctness but potential performance hit<br>**NoSQL**: Performance/scalability vs. consistency |
+| **Transaction Model** | ACID-compliant with multi-statement transactions | Often BASE; limited or no multi-document/row transactions | **RDBMS**: Complex operations remain atomic<br>**NoSQL**: Application must handle partial failures |
+| **Read Behavior** | Always returns the most recent committed data | May return stale data (eventual consistency) | **RDBMS**: Predictable but slower<br>**NoSQL**: Faster reads but may be outdated |
+| **Write Behavior** | Synchronous replication | Often asynchronous replication | **RDBMS**: Data safe but higher latency<br>**NoSQL**: Lower latency but risk of data loss on failure |
+| **Conflict Resolution** | Prevented via locks | Application-defined (last-write-wins, vector clocks, CRDTs) | **RDBMS**: Automatic but blocking<br>**NoSQL**: Flexible but complex to implement |
+| **Examples** | COMMIT ensures all-or-nothing | Cassandra (tunable), MongoDB (eventual), DynamoDB (configurable) | |
+
+---
+
+## **2. Scalability**
+
+| Aspect | RDBMS | NoSQL | Trade-offs |
+|--------|-------|-------|------------|
+| **Primary Scaling** | Vertical scaling (scale-up) | Horizontal scaling (scale-out) | **RDBMS**: Hardware limits, expensive<br>**NoSQL**: More cost-effective, no single point of failure |
+| **Architecture** | Monolithic, single-server or master-slave replication | Distributed, shared-nothing architecture | **RDBMS**: Simpler to manage<br>**NoSQL**: More complex coordination |
+| **Partition Tolerance** | Poor (CAP theorem: CP systems) | Excellent (CAP theorem: AP or CP options) | **RDBMS**: May become unavailable during partitions<br>**NoSQL**: Remains available but may sacrifice consistency |
+| **Data Distribution** | Manual sharding (complex) | Automatic sharding (built-in) | **RDBMS**: Manual effort, expertise required<br>**NoSQL**: Simpler scaling, but may affect query patterns |
+| **Max Practical Scale** | TBs to few PBs with specialized hardware | 100s of PBs across 1000s of nodes | **RDBMS**: Limits reached sooner<br>**NoSQL**: Almost limitless horizontal growth |
+| **Performance at Scale** | Degrades with joins/complex queries | Maintains performance for simple operations | **RDBMS**: Query optimization harder at scale<br>**NoSQL**: Predictable performance for specific patterns |
+
+---
+
+## **3. Query Flexibility**
+
+| Aspect | RDBMS | NoSQL | Trade-offs |
+|--------|-------|-------|------------|
+| **Query Language** | SQL (standardized, declarative) | Varies: proprietary, limited, or SQL-like | **RDBMS**: Portable skills, powerful expressions<br>**NoSQL**: Learning curve, vendor lock-in |
+| **Join Operations** | Native, multi-table joins | Generally no joins; denormalized data | **RDBMS**: Flexible relationships<br>**NoSQL**: Application-side joins or data duplication |
+| **Aggregation** | Rich: GROUP BY, window functions, subqueries | Limited or specialized (MapReduce, aggregation pipelines) | **RDBMS**: Complex analytics out-of-box<br>**NoSQL**: May require external processing |
+| **Ad-hoc Queries** | Excellent (any column, any condition) | Limited (often need predefined indexes) | **RDBMS**: Exploratory analysis friendly<br>**NoSQL**: Requires upfront query pattern knowledge |
+| **Indexing** | Multiple index types (B-tree, hash, etc.) | Usually simpler indexing (often primary only) | **RDBMS**: Flexible optimization<br>**NoSQL**: Simpler but less query flexibility |
+| **Examples** | `SELECT * FROM users JOIN orders ON...` | MongoDB: `db.collection.find({age: {$gt: 25}})`<br>Cassandra: Limited WHERE clause options | |
+
+---
+
+## **4. Schema Rigidity**
+
+| Aspect | RDBMS | NoSQL | Trade-offs |
+|--------|-------|-------|------------|
+| **Schema Definition** | Schema-on-write (rigid, predefined) | Schema-on-read (flexible, dynamic) | **RDBMS**: Data quality enforced<br>**NoSQL**: Rapid iteration possible |
+| **Schema Changes** | ALTER TABLE (can be expensive, blocking) | Dynamic, no migration needed | **RDBMS**: Safe but slow evolution<br>**NoSQL**: Fast changes but potential data inconsistencies |
+| **Data Types** | Strict, predefined types | Flexible, often JSON/BSON documents | **RDBMS**: Type safety, validation<br>**NoSQL**: Schema-less, heterogeneous data |
+| **Null Values** | Explicitly defined columns, NULLs allowed | No storage for missing fields | **RDBMS**: Predictable structure<br>**NoSQL**: Sparse data efficient |
+| **Data Integrity** | Enforced (PK, FK, constraints, triggers) | Application responsibility | **RDBMS**: Automatic integrity<br>**NoSQL**: Developer must ensure consistency |
+| **Evolution Example** | Adding a column: `ALTER TABLE users ADD COLUMN...` | Just start writing new fields to documents | **RDBMS**: All rows updated (potentially slow)<br>**NoSQL**: Only new documents have field |
+
+## Step 4
+# Banking system
+
+- Recommended storage type - RDBMS 
+- Justification based on: 
+- Data structure requirements - Highly structured: accounts, customers, transactions, balances. Strong relationships (customers have accounts, accounts have transactions) with referential integrity needs
+- Consistency Needs - ACID mandatory: Transactions must be atomic (transfers all-or-nothing), consistent (balances always correct), isolated (concurrent transfers don't interfere), durable (once committed, permanent)
+- Query Patterns - Complex joins: "Show all transactions for customer X between dates Y-Z with vendor W". Aggregations: "Daily balance summaries", "Monthly interest calculations".
+- Scalability requirements - Moderate-high scale but not "internet-scale". Vertical scaling often sufficient. Predictable growth.
+
+# E-commerce platform
+
+- Recommended storage type - RDBMS for transactional data
+-Justification based on:
+- Data structure requirements - Mixed: Structured (orders, payments, inventory), semi-structured (product catalogs with varying attributes), unstructured (reviews, images).
+- Consistency Needs - • ACID needed for: Inventory (last item), payments, orders
+• Eventual consistency acceptable for: Product recommendations, reviews, user wishlists
+• Session data: Can be eventually consistent
+- Query Patterns - • Complex joins for order history, reporting
+• Simple key-value for sessions
+• Full-text search for product discovery
+• Aggregations for analytics
+- Scalability requirements - High and variable: Black Friday spikes, global expansion. Need horizontal scaling for user-facing components.
+
+# Telecom call data records (CDR)
+
+- Recommended storage type - Apache Cassandra, HBase,
+- Justification based on:
+- Data structure requirements - Semi-structured but consistent format: call timestamps, source/destination numbers, duration, cost. High volume with predictable columns.
+- Consistency Needs - Eventual consistency acceptable: Billing can be slightly delayed. Call records are write-once, read-many. No updates after creation.
+- Query Patterns - • Primary: High-volume writes (millions of calls/day)
+• Read patterns: Time-range queries ("all calls from 2-3pm"), aggregation by customer/region
+• Minimal joins: Each CDR is mostly independent
+- Scalability requirements - Extremely high: Millions of customers, billions of calls monthly. Must scale horizontally across data centers. High write throughput critical.
+
+###################################################################################################################################################################################################################
+## M6.03
+###################################################################################################################################################################################################################
+
+# Logging systems
+
+- What is the primary operation? - WRITE operations - Appending log entries (application logs, system metrics, audit trails, error logs)
+- Is it read-heavy or write-heavy? - write heavy
+- Explain why - High volume of writes: Every application action, user request, system event generates log entries, Continuous streaming: Logs are generated 24/7, often with high velocity (thousands to millions of events per second)
+- What are the implications for storage design? - Optimize for append-only operations, sequential writes, minimal indexing, Horizontal scaling to handle load Spikes, Ensure no log loss even during failures
+
+- Reporting Dashboards - 
+- What is the primary operation? - READ operations - Aggregating, filtering, and visualizing data
+- Is it read-heavy or write-heavy? - read heavy
+- Explain why - Continuous queries: Dashboards refresh automatically (every 30s, 1min, 5min),Multiple concurrent users: Many stakeholders viewing dashboards simultaneously,Read ratio: Often 1000:1 or higher read-to-write ratio
+- What are the implications for storage design? - fast aggregations(Pre-compute aggregates, materialized views, Caching),Support many simultaneous queries without locking,Heavy caching of dashboard results
+
+- Transactional APIs
+
+- What is the primary operation? - Mixed but balanced - Both reads and writes with transactional integrity
+- Is it read-heavy or write-heavy? - both
+- Explain why - CRUD operations: Create, Read, Update, Delete all occur regularly,User interactions: Every action involves read (check state) → process → write (update state)
+- What are the implications for storage design? - ACID compliance, low latency, concurrent Access
+
+# Step 2: Aggregation vs Embedding (15 mins)
+Explain:
+
+- When aggregation queries dominate
+
+What are aggregation queries? - Aggregation queries compute summary statistics across multiple records using operations like: Count(),sum(),avg(),min(),max()
+When do they dominate? - Business intelligence & analytics dashboards, Financial reporting (daily sales, quarterly revenue),Monitoring systems (average response times, error rates)
+What storage systems support aggregation well? - data warehouses, olap databases, time series databases
+Provide examples - E-commerce Analytics, User Activity Dashboard
+
+- When document embedding is preferable
+
+What is document embedding? - Document embedding involves nesting related data within a single document/record rather than storing it in separate tables and joining.
+When is it preferable? - Bounded one-to-many relationships: User with orders, blog post with comments, Data accessed together: If you always fetch user with their last 5 orders, Hierarchical data: Categories with subcategories with products
+What storage systems support embedding? - MongoDB, Couchbase
+Provide examples - Blog platform, Product catalog
+
+Impact on performance and maintenance 
+
+How does aggregation affect performance? - Columnar storage: Process columns independently, better compression, Parallel processing: Distribute aggregation across multiple nodes
+How does embedding affect performance? - Single read operation: Fetch all related data in one go, No joins: Eliminates join computation Overhead, Predictable performance: Document size known in advance
+What are the maintenance trade-offs? - data Consistency, backup, data Quality, Schema changes
+When to choose each Approach - Analytical Workloads → Columnar database like Redshift/BigQuery, Time-Series Analysis → Time-series database like TimescaleDB,  Large-Scale Reporting → OLAP system like Druid,
+Content Management Systems → MongoDB, fetch entire post in one query, User Profiles with Preferences → Couchbase, single document per user
+ 
+- Map query patterns to storage systems:
+
+RDBMS
+
+What query patterns work well with RDBMS? - Complex Joins Across Multiple Tables, ACID Transactions with Multiple Operations
+Why? Native JOIN optimization: Decades of query optimization Research, Foreign key relationships: Enforced referential Integrity, Cost-based optimization: Statistics help choose optimal join order
+Provide examples - Complex Subqueries and CTEs, Ad-hoc Analytical Queries with Aggregations
+
+Document stores
+
+What query patterns work well with document stores? -  Fetching Complete Hierarchical Documents, Querying Nested/Embedded Data
+Why? - Document model: Native hierarchical storage, Single read operation: Fetch entire object graph, Dot notation: Simple path expressions to nested fields, Index support: Can index nested fields and array elements
+Provide examples - Partial Updates to Documents,  Geospatial Queries
+
+Columnar systems
+
+What query patterns work well with columnar systems? - Large-Scale Aggregations and GROUP BY, Analytical Queries with Few Columns
+Why? - Column compression: Similar values compress well (delta, dictionary, run-length encoding), Minimal I/O: Only read columns needed for query, Column pruning: Skip unneeded columns entirely, Late materialization: Delay row reconstruction until needed
+Provide examples - Time-Series Analysis and Window Functions, Star/Snowflake Schema Queries
+
+## Summarize how query patterns influence:
+
+Schema design
+
+How do read patterns influence schema? - Key Principle: Denormalize for reads, normalize for writes
+How do write patterns influence schema? - Key Principle: Normalize for writes, minimize contention
+How do aggregation needs influence schema? - Key Principle: Pre-aggregate, materialize, star schema
+Provide examples - Analytics, total_sales, daily_sales, User profile (frequent) vs preferences (rare)
+
+Storage choice
+
+How do query patterns influence storage selection? - Decision Matrix Based on Query Patterns:Complex joins + ACID->RDBMS (PostgreSQL, MySQL), Hierarchical reads->Document DB (MongoDB)
+What factors matter most? - Read/Write Ratio, Data Access Pattern, Query Complexity
+Provide examples - Real-time Analytics Dashboard, User Session Management, E-commerce Product Catalog
+
+Indexing strategy
+
+How do query patterns influence indexing? - Index Selection Based on Query Patterns: Equality searches -> B-tree/Hash Indexes, Text search -> Full-text indexes
+What indexes support read-heavy workloads? - Strategy: "Index everything you query, nothing you don't", Covering indexes: Include all queried columns, Composite indexes: Order by selectivity (most selective first)
+What indexes support write-heavy workloads? - Strategy: "Minimize indexes, batch updates, optimize structure", Fewer indexes: Each index adds write Overhead, Append-only designs: No updates to indexed columns
+Provide examples - Social Media Feed (Read-Heavy), IoT Sensor Data (Write-Heavy)
