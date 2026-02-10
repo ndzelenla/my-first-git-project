@@ -265,5 +265,25 @@ ORDER BY customer_id, order_date;
 
 - How SQL is used in data warehouses - as a unified query language for analyzing historical and integrated data from multiple sources
 - What makes warehouse queries different - columnar storage, dimensional modelling, distributed query execution and materialized views and aggregations
-- Examples of warehouse use cases - time travel and historical Analysis, Enterprise BI, customer 360 analytics
+- Examples of warehouse use cases - time travel and historical Analysis, Enterprise BI, customer 360 Analytics
+
+#######################################################################################################################################################################################
+### M6.02 RDBMS vs NoSQL Decision Analysis
+#######################################################################################################################################################################################
+
+## Document stores
+
+- What they are - they are Nosql databases that store data as flexible, self describing documents (typically in json, sml or yaml)
+- Key characteristics - Schema flexibility, self contained, horizontal scalability and replication
+- Use cases - Content Management Systems, real time applications and IOT applications
+- Examples (MongoDB, CouchDB)
+
+## Key-Value stores
+
+- What they are - they are Nosql databases that store data as siimple key value pairs, where the key is a unique identifier and the value is the data itself
+- Key characteristics - extremely simple (get/set/put/delete), fast oerformance, not just in memory and scaling is horizontal
+- Use cases - accelerating applications, stateless applications and real time features
+- Examples (Redis, DynamoDB)
+
+##
 
