@@ -1,0 +1,158 @@
+Customer
+- Attributes: customer_id, name, email, phone, address
+- Candidate identifiers: customer_id, email
+
+Order
+- Attributes: order_id, order_date, customer_id, total_amount
+- Candidate identifiers: order_id
+
+Product
+- Attributes: product_id, name, description, price, category
+- Candidate identifiers: product_id, SKU
+
+OrderItem
+- Attributes: order_id, product_id, quantity, unit_price
+- Candidate identifiers: (order_id, product_id)
+
+--- Select the primary key
+
+Choose the best identifier for each Entity - customer Entity - Primary key : customer_id, 
+Consider uniqueness, stability, and simplicity - Uniqueness Guaranteed: Auto-increment ensures no duplicates, Stability: Never changes (emails can change, causing foreign key issues), Simplicity: Single integer, easy to reference in foreign keys
+Explain why it uniquely identifies records -email (Natural Key)- Volatility: Customers can change email addresses
+
+-- For orders: Order Entity
+- Selected Primary Key: order_id (Surrogate Key)
+Why order_id?
+
+Business Requirement: Orders need unique identifiers for tracking
+
+Stability: Order IDs should never change once assigned
+
+Simplicity: Single integer field, easy for customers to reference
+
+-- For Products:
+- Selected Primary Key: product_id (Surrogate Key)
+Why product_id?
+
+Stability: Internal ID never changes even if SKU changes
+
+Performance: Integer joins faster than string-based SKU joins
+
+Simplicity: Consistent with other entity keys
+
+-- SKU as Natural Key - Why Not Primary?
+
+Format Changes: SKU numbering schemes may evolve
+
+Business Mergers: SKU formats might conflict during acquisitions
+
+Length Issues: SKUs can be long strings (less efficient)
+
+Order → Customer
+- Relationship: One customer can have many orders
+- Foreign key: Order.customer_id → Customer.customer_id
+- Required: Yes (every order must have a customer)
+
+OrderItem → Order
+- Relationship: One order can have many order items
+- Foreign key: OrderItem.order_id → Order.order_id
+- Required: Yes (every order item must belong to an order)
+
+OrderItem → Product
+- Relationship: One product can appear in many order items
+- Foreign key: OrderItem.product_id → Product.product_id
+- Required: Yes (every order item must reference a product)
+
+Composite Key Analysis (10 mins)
+Why order_id + product_id is a composite key - In the OrderItem table, we need to track which products are in which orders. This is a classic many-to-many relationship
+
+Explain why both columns are needed - Only One Product Per Order: Primary key constraint prevents adding multiple products to same order
+What makes this combination unique - Uniqueness: Each product appears only once per order (quantity handles multiples)
+Why a single column wouldn't work - Business Logic Violation: Orders typically contain multiple products
+What breaks if only one column is used - Product Exclusivity: Each product can only appear in ONE order ever
+
+What problems would occur with only order_id - Only One Product Per Order: Primary key constraint prevents adding multiple products to same order
+What problems would occur with only product_id - Product Exclusivity: Each product can only appear in ONE order ever
+Why the combination is necessary - The composite key (order_id, product_id) perfectly models the business rule:
+
+Uniqueness: Each product appears only once per order (quantity handles multiples)
+
+Analysis questions:
+
+Can an order have the same product multiple times? - Yes, but not as separate rows with the same composite key. The quantity is handled by the quantity column
+How would you represent quantity if you only used order_id? - 
+-- Bad design attempt with only order_id
+CREATE TABLE OrderItem_Bad1 (
+    order_id INT PRIMARY KEY,
+    -- How to store multiple products? Arrays? JSON? Separate columns?
+    product_list JSON,  -- Bad: breaks normalization
+    -- OR
+    product1_id INT, product1_qty INT,
+    product2_id INT, product2_qty INT,  -- Worse: fixed number of products
+    product3_id INT, product3_qty INT
+);
+
+How would you represent quantity if you only used product_id? - 
+-- Bad design attempt with only product_id
+CREATE TABLE OrderItem_Bad2 (
+    product_id INT PRIMARY KEY,
+    -- How to store which orders contain this product?
+    order_list JSON,  -- Bad: breaks first normal form
+    -- OR
+    order1_id INT, order1_qty INT,
+    order2_id INT, order2_qty INT  -- Worse: fixed number of orders
+);
+
+What happens if you try to use a single-column key?
+
+-- With single-column key (order_id only)
+CREATE TABLE OrderItem_SinglePK (
+    order_id INT PRIMARY KEY,  -- ❌ WRONG DESIGN
+    product_id INT NOT NULL,
+    quantity INT NOT NULL
+);
+
+-- Attempt to insert realistic order data
+INSERT INTO OrderItem_SinglePK VALUES (1001, 500, 2);  -- OK
+INSERT INTO OrderItem_SinglePK VALUES (1001, 501, 1);  -- ❌ FAILS: duplicate order_id
+-- Result: Order 1001 can only have ONE product!
+
+-- With single-column key (product_id only)  
+CREATE TABLE OrderItem_SinglePK2 (
+    order_id INT NOT NULL,
+    product_id INT PRIMARY KEY,  -- ❌ WRONG DESIGN
+    quantity INT NOT NULL
+);
+
+INSERT INTO OrderItem_SinglePK2 VALUES (1001, 500, 2);  -- OK
+INSERT INTO OrderItem_SinglePK2 VALUES (1002, 500, 3);  -- ❌ FAILS: duplicate product_id  
+-- Result: Product 500 can only be in ONE order ever!
+
+┌─────────────────┐     1      ┌─────────────────┐     1      ┌─────────────────┐
+│    CUSTOMER     │───────────▶│      ORDER      │───────────▶│   ORDERITEM     │
+├─────────────────┤    places  ├─────────────────┤  contains  ├─────────────────┤
+│ PK customer_id  │            │ PK order_id     │            │ PK order_id(FK) │
+│    name         │            │ FK customer_id  │◀───────────│ PK product_id(FK)│
+│ UK email        │            │    order_date   │   part_of  │    quantity     │
+│    phone        │◀───────────│    total_amount │            │   unit_price    │
+│    address      │    M       │    status       │      M     │  line_total     │
+│    created_at   │            │ shipping_address│            └────────┬────────┘
+│    updated_at   │            │ billing_address │                     │
+└─────────────────┘            └─────────────────┘                     │
+                                                                       │ references
+                                                                       │
+                                                                       │ 1
+                                                                       ▼
+                                                            ┌─────────────────┐
+                                                            │    PRODUCT      │
+                                                            ├─────────────────┤
+                                                            │ PK product_id   │
+                                                            │ UK sku          │
+                                                            │    name         │
+                                                            │    description  │
+                                                            │    price        │
+                                                            │    category     │
+                                                            │ stock_quantity  │
+                                                            │   is_active     │
+                                                            │    created_at   │
+                                                            └─────────────────┘
