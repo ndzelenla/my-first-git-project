@@ -1,0 +1,442 @@
+Customer
+- Attributes: customer_id, name, email, phone, address
+- Candidate identifiers: customer_id, email
+
+Order
+- Attributes: order_id, order_date, customer_id, total_amount
+- Candidate identifiers: order_id
+
+Product
+- Attributes: product_id, name, description, price, category
+- Candidate identifiers: product_id, SKU
+
+OrderItem
+- Attributes: order_id, product_id, quantity, unit_price
+- Candidate identifiers: (order_id, product_id)
+
+--- Select the primary key
+
+Choose the best identifier for each Entity - customer Entity - Primary key : customer_id, 
+Consider uniqueness, stability, and simplicity - Uniqueness Guaranteed: Auto-increment ensures no duplicates, Stability: Never changes (emails can change, causing foreign key issues), Simplicity: Single integer, easy to reference in foreign keys
+Explain why it uniquely identifies records -email (Natural Key)- Volatility: Customers can change email addresses
+
+-- For orders: Order Entity
+- Selected Primary Key: order_id (Surrogate Key)
+Why order_id?
+
+Business Requirement: Orders need unique identifiers for tracking
+
+Stability: Order IDs should never change once assigned
+
+Simplicity: Single integer field, easy for customers to reference
+
+-- For Products:
+- Selected Primary Key: product_id (Surrogate Key)
+Why product_id?
+
+Stability: Internal ID never changes even if SKU changes
+
+Performance: Integer joins faster than string-based SKU joins
+
+Simplicity: Consistent with other entity keys
+
+-- SKU as Natural Key - Why Not Primary?
+
+Format Changes: SKU numbering schemes may evolve
+
+Business Mergers: SKU formats might conflict during acquisitions
+
+Length Issues: SKUs can be long strings (less efficient)
+
+Order → Customer
+- Relationship: One customer can have many orders
+- Foreign key: Order.customer_id → Customer.customer_id
+- Required: Yes (every order must have a customer)
+
+OrderItem → Order
+- Relationship: One order can have many order items
+- Foreign key: OrderItem.order_id → Order.order_id
+- Required: Yes (every order item must belong to an order)
+
+OrderItem → Product
+- Relationship: One product can appear in many order items
+- Foreign key: OrderItem.product_id → Product.product_id
+- Required: Yes (every order item must reference a product)
+
+Composite Key Analysis (10 mins)
+Why order_id + product_id is a composite key - In the OrderItem table, we need to track which products are in which orders. This is a classic many-to-many relationship
+
+Explain why both columns are needed - Only One Product Per Order: Primary key constraint prevents adding multiple products to same order
+What makes this combination unique - Uniqueness: Each product appears only once per order (quantity handles multiples)
+Why a single column wouldn't work - Business Logic Violation: Orders typically contain multiple products
+What breaks if only one column is used - Product Exclusivity: Each product can only appear in ONE order ever
+
+What problems would occur with only order_id - Only One Product Per Order: Primary key constraint prevents adding multiple products to same order
+What problems would occur with only product_id - Product Exclusivity: Each product can only appear in ONE order ever
+Why the combination is necessary - The composite key (order_id, product_id) perfectly models the business rule:
+
+Uniqueness: Each product appears only once per order (quantity handles multiples)
+
+Analysis questions:
+
+Can an order have the same product multiple times? - Yes, but not as separate rows with the same composite key. The quantity is handled by the quantity column
+How would you represent quantity if you only used order_id? - 
+-- Bad design attempt with only order_id
+CREATE TABLE OrderItem_Bad1 (
+    order_id INT PRIMARY KEY,
+    -- How to store multiple products? Arrays? JSON? Separate columns?
+    product_list JSON,  -- Bad: breaks normalization
+    -- OR
+    product1_id INT, product1_qty INT,
+    product2_id INT, product2_qty INT,  -- Worse: fixed number of products
+    product3_id INT, product3_qty INT
+);
+
+How would you represent quantity if you only used product_id? - 
+-- Bad design attempt with only product_id
+CREATE TABLE OrderItem_Bad2 (
+    product_id INT PRIMARY KEY,
+    -- How to store which orders contain this product?
+    order_list JSON,  -- Bad: breaks first normal form
+    -- OR
+    order1_id INT, order1_qty INT,
+    order2_id INT, order2_qty INT  -- Worse: fixed number of orders
+);
+
+What happens if you try to use a single-column key?
+
+-- With single-column key (order_id only)
+CREATE TABLE OrderItem_SinglePK (
+    order_id INT PRIMARY KEY,  -- ❌ WRONG DESIGN
+    product_id INT NOT NULL,
+    quantity INT NOT NULL
+);
+
+-- Attempt to insert realistic order data
+INSERT INTO OrderItem_SinglePK VALUES (1001, 500, 2);  -- OK
+INSERT INTO OrderItem_SinglePK VALUES (1001, 501, 1);  -- ❌ FAILS: duplicate order_id
+-- Result: Order 1001 can only have ONE product!
+
+-- With single-column key (product_id only)  
+CREATE TABLE OrderItem_SinglePK2 (
+    order_id INT NOT NULL,
+    product_id INT PRIMARY KEY,  -- ❌ WRONG DESIGN
+    quantity INT NOT NULL
+);
+
+INSERT INTO OrderItem_SinglePK2 VALUES (1001, 500, 2);  -- OK
+INSERT INTO OrderItem_SinglePK2 VALUES (1002, 500, 3);  -- ❌ FAILS: duplicate product_id  
+-- Result: Product 500 can only be in ONE order ever!
+
+┌─────────────────┐     1      ┌─────────────────┐     1      ┌─────────────────┐
+│    CUSTOMER     │───────────▶│      ORDER      │───────────▶│   ORDERITEM     │
+├─────────────────┤    places  ├─────────────────┤  contains  ├─────────────────┤
+│ PK customer_id  │            │ PK order_id     │            │ PK order_id(FK) │
+│    name         │            │ FK customer_id  │◀───────────│ PK product_id(FK)│
+│ UK email        │            │    order_date   │   part_of  │    quantity     │
+│    phone        │◀───────────│    total_amount │            │   unit_price    │
+│    address      │    M       │    status       │      M     │  line_total     │
+│    created_at   │            │ shipping_address│            └────────┬────────┘
+│    updated_at   │            │ billing_address │                     │
+└─────────────────┘            └─────────────────┘                     │
+                                                                       │ references
+                                                                       │
+                                                                       │ 1
+                                                                       ▼
+                                                            ┌─────────────────┐
+                                                            │    PRODUCT      │
+                                                            ├─────────────────┤
+                                                            │ PK product_id   │
+                                                            │ UK sku          │
+                                                            │    name         │
+                                                            │    description  │
+                                                            │    price        │
+                                                            │    category     │
+                                                            │ stock_quantity  │
+                                                            │   is_active     │
+                                                            │    created_at   │
+                                                            └─────────────────┘
+
+#####################################################################################################################################################################################
+# M7.02
+######################################################################################################################################################################################
+
+Table: orders_raw
+order_id | customer_name | customer_city | product_name | product_price | quantity
+
+Issues Identified:
+
+Data Redundancy:
+
+Customer information repeated for each order line
+
+Product information repeated for each order line
+
+Example: "John Smith, New York" appears 3 times
+
+Example: "Laptop, 1200.00" appears 2 times
+###############################################
+
+Update Anomalies:
+
+Update Problem: If customer "John Smith" moves to "Boston", need to update 3 rows
+
+Risk of inconsistent data if some rows not updated
+####################################
+
+Insertion Anomalies:
+
+Insert Problem: Cannot add a new customer without them placing an order
+
+Cannot add a new product without it being ordered
+#############################################
+
+Deletion Anomalies:
+
+Delete Problem: If order 1002 is deleted, lose information about product "Keyboard"
+
+If last order for "Mouse" is deleted, lose product Information
+##############################################
+
+Atomicity Violation:
+
+Combined customer, order, and product data in single table
+
+Violates single responsibility principle for tables
+#######################
+functional dependencies identified
+1. order_id → customer_name, customer_city
+2. order_id, product_name → quantity, product_price
+3. product_name → product_price
+4. customer_name → customer_city (assuming name uniquely identifies customer)
+
+Primary Key Candidate:
+Composite Key: (order_id, product_name)
+
+However, this still leaves normalization issues
+
+
+###################################
+First Normal Form (1NF) Normalized Schema
+Requirements for 1NF:
+Each column contains atomic values (no repeating groups)
+
+Each column has unique name
+
+All values in a column are same data type
+
+Current State Analysis:
+The current table is already in 1NF because:
+
+All columns contain atomic values
+
+No repeating groups or arrays
+
+Each column has unique name
+
+Values are consistent data types
+-- 1NF Schema (same structure but with proper key)
+CREATE TABLE orders_1nf (
+    order_id INT NOT NULL,
+    customer_name VARCHAR(100) NOT NULL,
+    customer_city VARCHAR(50) NOT NULL,
+    product_name VARCHAR(100) NOT NULL,
+    product_price DECIMAL(10, 2) NOT NULL,
+    quantity INT NOT NULL,
+    PRIMARY KEY (order_id, product_name)  -- Composite key
+);
+
+-- Sample data in 1NF
+INSERT INTO orders_1nf VALUES
+(1001, 'John Smith', 'New York', 'Laptop', 1200.00, 1),
+(1001, 'John Smith', 'New York', 'Mouse', 25.00, 2),
+(1002, 'Jane Doe', 'Los Angeles', 'Keyboard', 75.00, 1),
+(1003, 'John Smith', 'New York', 'Monitor', 300.00, 1),
+(1004, 'Bob Johnson', 'Chicago', 'Laptop', 1200.00, 1),
+(1004, 'Bob Johnson', 'Chicago', 'Mouse', 25.00, 1);
+
+1NF Problems Still Present:
+
+Data redundancy (customer and product info repeated)
+
+Update anomalies still exist
+
+Partial key dependency issues
+
+################################
+Second Normal Form (2NF) Normalized Schema
+Requirements for 2NF:
+Must be in 1NF
+
+No partial dependencies (all non-key attributes fully dependent on entire primary key)
+
+Partial Dependency Analysis:
+For table with PK (order_id, product_name):
+
+Full Dependencies (depend on entire PK):
+
+quantity - depends on BOTH order_id AND product_name
+
+Partial Dependencies (depend on part of PK):
+
+customer_name, customer_city - depend only on order_id
+
+product_price - depends only on product_name
+
+-- Table 1: Orders (depends on order_id only)
+CREATE TABLE orders_2nf (
+    order_id INT PRIMARY KEY,
+    customer_name VARCHAR(100) NOT NULL,
+    customer_city VARCHAR(50) NOT NULL
+);
+
+-- Table 2: Products (depends on product_name only)
+CREATE TABLE products_2nf (
+    product_name VARCHAR(100) PRIMARY KEY,
+    product_price DECIMAL(10, 2) NOT NULL
+);
+
+-- Table 3: OrderItems (depends on both order_id and product_name)
+CREATE TABLE order_items_2nf (
+    order_id INT NOT NULL,
+    product_name VARCHAR(100) NOT NULL,
+    quantity INT NOT NULL,
+    PRIMARY KEY (order_id, product_name),
+    FOREIGN KEY (order_id) REFERENCES orders_2nf(order_id),
+    FOREIGN KEY (product_name) REFERENCES products_2nf(product_name)
+);
+
+-- Sample data population
+INSERT INTO orders_2nf VALUES
+(1001, 'John Smith', 'New York'),
+(1002, 'Jane Doe', 'Los Angeles'),
+(1003, 'John Smith', 'New York'),  -- Still redundant!
+(1004, 'Bob Johnson', 'Chicago');
+
+INSERT INTO products_2nf VALUES
+('Laptop', 1200.00),
+('Mouse', 25.00),
+('Keyboard', 75.00),
+('Monitor', 300.00);
+
+INSERT INTO order_items_2nf VALUES
+(1001, 'Laptop', 1),
+(1001, 'Mouse', 2),
+(1002, 'Keyboard', 1),
+(1003, 'Monitor', 1),
+(1004, 'Laptop', 1),
+(1004, 'Mouse', 1);
+
+2NF Improvements:
+
+Eliminated partial dependencies
+
+Reduced data redundancy for products
+
+Better data integrity with foreign keys
+
+2NF Problems Still Present:
+
+Customer redundancy still exists (John Smith appears twice)
+
+Transitive dependency: customer_name → customer_city
+
+Customer information not properly normalized
+#########################################################
+Third Normal Form (3NF) Normalized Schema
+Requirements for 3NF:
+Must be in 2NF
+
+No transitive dependencies (non-key attributes depend only on primary key)
+
+Transitive Dependency Analysis:
+In orders_2nf table:
+
+PK: order_id
+
+customer_name depends on order_id ✓
+
+customer_city depends on customer_name (transitive) ❌
+
+customer_city should depend directly on order_id, but it doesn't
+
+-- Table 1: Customers (new table to eliminate transitive dependency)
+CREATE TABLE customers_3nf (
+    customer_id INT PRIMARY KEY AUTO_INCREMENT,
+    customer_name VARCHAR(100) NOT NULL UNIQUE,  -- Assuming names are unique
+    customer_city VARCHAR(50) NOT NULL
+);
+
+-- Table 2: Orders (references customers)
+CREATE TABLE orders_3nf (
+    order_id INT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    order_date DATE DEFAULT CURRENT_DATE,  -- Added for completeness
+    FOREIGN KEY (customer_id) REFERENCES customers_3nf(customer_id)
+);
+
+-- Table 3: Products (unchanged from 2NF)
+CREATE TABLE products_3nf (
+    product_id INT PRIMARY KEY AUTO_INCREMENT,  -- Added surrogate key
+    product_name VARCHAR(100) NOT NULL UNIQUE,
+    product_price DECIMAL(10, 2) NOT NULL
+);
+
+-- Table 4: OrderItems (now with product_id instead of product_name)
+CREATE TABLE order_items_3nf (
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(10, 2) NOT NULL,  -- Price at time of order
+    PRIMARY KEY (order_id, product_id),
+    FOREIGN KEY (order_id) REFERENCES orders_3nf(order_id),
+    FOREIGN KEY (product_id) REFERENCES products_3nf(product_id)
+);
+
+-- Sample data population
+INSERT INTO customers_3nf (customer_name, customer_city) VALUES
+('John Smith', 'New York'),
+('Jane Doe', 'Los Angeles'),
+('Bob Johnson', 'Chicago');
+
+INSERT INTO orders_3nf (order_id, customer_id) VALUES
+(1001, 1),  -- John Smith
+(1002, 2),  -- Jane Doe
+(1003, 1),  -- John Smith (same customer, different order)
+(1004, 3);  -- Bob Johnson
+
+INSERT INTO products_3nf (product_name, product_price) VALUES
+('Laptop', 1200.00),
+('Mouse', 25.00),
+('Keyboard', 75.00),
+('Monitor', 300.00);
+
+INSERT INTO order_items_3nf (order_id, product_id, quantity, unit_price) VALUES
+-- Order 1001
+(1001, 1, 1, 1200.00),  -- Laptop
+(1001, 2, 2, 25.00),    -- Mouse
+-- Order 1002
+(1002, 3, 1, 75.00),    -- Keyboard
+-- Order 1003
+(1003, 4, 1, 300.00),   -- Monitor
+-- Order 1004
+(1004, 1, 1, 1200.00),  -- Laptop
+(1004, 2, 1, 25.00);    -- Mouse
+
+3NF Schema Summary:
+Tables Created:
+
+customers_3nf - Customer information (PK: customer_id)
+
+orders_3nf - Order headers (PK: order_id, FK: customer_id)
+
+products_3nf - Product catalog (PK: product_id)
+
+order_items_3nf - Order line items (PK: (order_id, product_id))
+
+
+
+
+
+
+
