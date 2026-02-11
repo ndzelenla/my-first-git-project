@@ -1,0 +1,174 @@
+Read-Heavy vs Write-Heavy Systems (15 mins)
+Evaluate:
+
+Transactional systems
+
+What is the primary operation? - WRITE operations (INSERT, UPDATE, DELETE)
+Is it read-heavy or write-heavy? - WRITE-HEAVY (often 70-80% writes, 20-30% reads)
+What schema style is preferred? - NORMALIZED (3NF) - Highly normalized
+Why?
+- Data Integrity: Eliminates duplication that could cause inconsistencies
+- Write Performance: Updates affect single locations, no redundant updates
+- Concurrency Control: Reduces lock contention across multiple tables
+- ACID Compliance: Easier to maintain transaction boundaries
+- Storage Efficiency: No redundant data storage
+
+Reporting systems
+
+What is the primary operation? - READ operations (SELECT queries)
+Is it read-heavy or write-heavy? - READ-HEAVY (often 90%+ reads)
+What schema style is preferred? - DENORMALIZED (Star/Snowflake schema)
+Why?
+- Query Performance: Fewer joins = faster queries
+- Simplified Queries: Single-table scans rather than complex joins
+- Index Efficiency: Better index utilization on denormalized structures
+- Predictable Performance: Consistent query patterns
+- Pre-computation: Aggregates can be pre-calculated
+
+Data warehouses
+
+What is the primary operation? - BULK READ operations with periodic BULK WRITE
+Is it read-heavy or write-heavy? - READ-HEAVY with scheduled WRITE bursts
+What schema style is preferred? - HYBRID/DENORMALIZED - Typically Dimensional Modeling
+Why?
+- Query Optimization: Denormalization eliminates expensive runtime joins
+- Columnar Benefits: Denormalized structures work better with columnar compression
+- Predictable Access: Known query patterns can be optimized
+- Time-based Partitioning: Denormalized fact tables partition efficiently
+- Aggregate Tables: Pre-computed summary tables for common queries
+
+####
+
+Performance vs Duplication (15 mins)
+Explain:
+
+Why joins hurt performance
+
+What happens when you join multiple tables? - Each join is essentially a cartesian product filter
+How does this affect query time? - 
+-- Query with multiple joins
+SELECT o.order_id, c.name, p.product_name, pay.amount
+FROM orders o
+JOIN customers c ON o.customer_id = c.id        -- Join #1
+JOIN order_items oi ON o.id = oi.order_id       -- Join #2  
+JOIN products p ON oi.product_id = p.id         -- Join #3
+JOIN payments pay ON o.id = pay.order_id;       -- Join #4
+
+Time → 
+Join1: Orders × Customers    → 50ms
+Join2: Result × Order_Items  → 120ms
+Join3: Result × Products     → 180ms  
+Join4: Result × Payments     → 250ms
+
+Total Query Time: ~600ms
+
+What are the performance costs? - CPU Costs, Memory Costs, I/O Costs, concurency cost
+Provide examples - 
+-- Denormalized: One table scan
+SELECT * FROM denormalized_orders WHERE date = '2024-01-01';
+-- Time: 50ms
+-- Scans: 1 table
+
+-- Normalized: Multiple joins  
+SELECT o.*, c.name, p.product_name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+JOIN products p ON o.product_id = p.id
+WHERE o.date = '2024-01-01';
+-- Time: 450ms (9x slower!)
+-- Scans: 3+ tables
+-- Index lookups: 1000s
+-- Temporary tables: Yes
+
+
+Why duplication risks inconsistency
+
+What happens when duplicated data changes? - it causes the update anomaly cascade
+How do you keep it synchronized? - Manual updates, triggers, materialized views, CDC
+What are the maintenance costs? - storage Costs, update Propagation Costs, complexity costs
+Provide examples
+E-commerce Site Inconsistency:
+1. Customer changes shipping address
+2. Application updates orders table
+3. BUT: Notification system cached address
+4. Weekend sale triggers notifications
+5. 10,000 emails sent to OLD address
+6. Customer complaints, lost trust, compensation Costs
+
+
+The trade-off
+
+When is performance more important? - Read heavy Analytics (BI Dashboards), Real time Systems
+When is consistency more important? - financial Systems, HealthCare, legal/Compliance
+How do you balance both? - CQRS (Command Query Responsibility Segregation), Eventual Consistency with Reconciliation, Hybrid Schema Design
+
+
+## For each case, choose normalized or denormalized and justify:
+
+Core banking transactions
+
+Recommended approach: Normalized or Denormalized? NORMALIZED
+Justification:
+Data integrity requirements - CRITICAL - MUST be 100% Consistent
+Query Patterns - Simple and predictable
+Consistency Needs - immediate consistency
+Performance requirements - write latency, concurrency, read volume
+
+
+Product catalog API
+
+Recommended approach: Normalized or Denormalized? - DENORMALIZED (or Hybrid with Caching)
+Justification: 
+Data integrity requirements - MODERATE
+Query Patterns - COMPLEX, JOIN-HEAVY, HIGH VOLUME
+Consistency Needs - EVENTUAL CONSISTENCY IS ACCEPTABLE
+Performance requirements - EXTREME READ PERFORMANCE
+
+
+Daily sales reporting
+
+Recommended approach: Normalized or Denormalized? - DENORMALIZED (Star Schema)
+Justification:
+Data integrity requirements -  HIGH, BUT NOT REAL-TIME
+Query Patterns - COMPLEX AGGREGATIONS ACROSS MILLIONS OF ROWS
+Consistency Needs - POINT-IN-TIME CONSISTENCY
+Performance requirements- Analytical speed
+
+Where strict normalization is mandatory
+
+What scenarios require normalization? - Financial Transaction Systems, Healthcare Patient Records
+Why is it non-negotiable? - Financial/Regulatory Penalties, Life and Safety Risks
+What are the consequences of denormalization? - Financial loss, regulatory fines, Patient harm, death 
+Provide examples - Banking, HealthCare
+
+Where denormalization is acceptable
+
+What scenarios allow denormalization? - Read optimized reporting Systems, Content delivery/ Caching
+Why is it acceptable? - No Life or Financial Risk, Read-Only or Append-Only operations
+What safeguards are needed? - TTL, rebuild capability, clear labeling
+Provide examples - Stale follower count = acceptable UX, not compliance Violation, Caches: Ephemeral, can be rebuilt
+
+
+Decision principles
+
+What principles guide your decisions? Normalize for Integrity, Denormalize for Performance, Consider the System's Primary Purpose
+How do you evaluate trade-offs?
+What questions do you ask?
+Before Normalizing:
+ "Is this data critical to business operations?" → Normalize
+ "Does this need to be auditable?" → Normalize
+ "Will multiple systems update this?" → Normalize
+ "Can we afford ANY inconsistency?" → Normalize
+
+Before Denormalizing:
+ "Is this read-mostly data?" → Consider denormalization
+ "Can we rebuild it from source?" → Consider denormalization
+ "Is performance the primary bottleneck?" → Consider denormalization
+ "Can we tolerate eventual consistency?" → Consider denormalization
+
+
+
+
+
+
+
