@@ -1,0 +1,220 @@
+For each dataset:
+
+Choose storage target (lake or warehouse)
+
+Specify:
+
+Zone (if lake: Raw, Silver, or Gold)
+Schema strategy (schema-on-read or schema-on-write)
+Batch or streaming (how data is ingested)
+Reasoning (why this choice)
+Output Format
+
+Create a table with columns:
+
+=====================================================================================================================================
+| STEP 1: DATASET ANALYSIS - CHARACTERISTICS & REQUIREMENTS                                                                        |
+|=====================================================================================================================================
+| DATASET            | DATA CHARACTERISTICS                                      | USAGE PATTERNS                              | CONSUMER REQUIREMENTS              |
+|====================|===========================================================|=============================================|====================================|
+| CUSTOMER           | STRUCTURE: Structured                                   | CONSUMERS: CRM system, Marketing, Support | FAST QUERIES: Yes - real-time     |
+| PROFILES           | (fixed schema: ID, name, email, phone, address,        | QUERY TYPE: Point lookups by ID,          | FLEXIBLE EXPLORATION: No         |
+|                    |  tier, created_date, status)                          |  email; updates on profile changes        | CONSISTENT SCHEMA: Yes           |
+|                    | VOLUME: Medium (10-50M records)                        | ACCESS PATTERN: Random reads/writes,      | REAL-TIME ACCESS: Yes            |
+|                    | GROWTH: Slow (5-10% annually)                          |  high concurrency                         |                                  |
+|                    | VELOCITY: Low (updates throughout day)                 | PERFORMANCE: <100ms latency required      |                                  |
+|                    | VARIETY: Low - schema stable                           |                                           |                                  |
+|--------------------|-----------------------------------------------------------|---------------------------------------------|------------------------------------|
+| ORDER             | STRUCTURE: Structured                                  | CONSUMERS: Order system, Finance,         | FAST QUERIES: Yes                |
+| TRANSACTIONS      | (fixed schema: order_id, cust_id, date, amount,       |  Inventory, Customer Service              | FLEXIBLE EXPLORATION: No         |
+|                    |  status, payment_method, shipping_address)            | QUERY TYPE: Lookup by order/customer,    | CONSISTENT SCHEMA: Yes           |
+|                    | VOLUME: Large (100M+ records/year)                     |  date range scans, aggregations          | REAL-TIME ACCESS: Yes            |
+|                    | GROWTH: High (20-30% annually)                         | ACCESS PATTERN: OLTP + basic analytics   |                                  |
+|                    | VELOCITY: Medium-High (thousands/hour)                 | PERFORMANCE: <200ms transactional,        |                                  |
+|                    | VARIETY: Low - schema stable                           |  <5s for analytics                       |                                  |
+|--------------------|-----------------------------------------------------------|---------------------------------------------|------------------------------------|
+| PRODUCT           | STRUCTURE: Structured                                  | CONSUMERS: Web app, Mobile app,          | FAST QUERIES: Yes - sub-50ms     |
+| CATALOG           | (fixed schema: SKU, name, desc, category, price,      |  Search, Recommendation                  | FLEXIBLE EXPLORATION: Yes        |
+|                    |  inventory, supplier, dimensions)                     | QUERY TYPE: Lookup by ID/SKU,            | CONSISTENT SCHEMA: Yes           |
+|                    | VOLUME: Medium (100K-1M products)                      |  category browse, search                 | REAL-TIME ACCESS: Yes            |
+|                    | GROWTH: Slow (5-10% annually)                          | ACCESS PATTERN: 95% reads, cacheable    |                                  |
+|                    | VELOCITY: Low (price/inventory updates)                | PERFORMANCE: <50ms for API,             |                                  |
+|                    | VARIETY: Low-Moderate (categories/subcategories)        |  near real-time inventory               |                                  |
+|--------------------|-----------------------------------------------------------|---------------------------------------------|------------------------------------|
+| WEB CLICKSTREAM   | STRUCTURE: Semi-structured                             | CONSUMERS: Data Science, Product,        | FAST QUERIES: No (minutes OK)    |
+|                    | (JSON events: session_id, user_id, page, timestamp,   |  Marketing, Engineering                  | FLEXIBLE EXPLORATION: Yes        |
+|                    |  referrer, user_agent, device, geolocation)           | QUERY TYPE: Funnel analysis,            | CONSISTENT SCHEMA: No            |
+|                    | VOLUME: Very High (1B+ events/month)                   |  user journeys, cohort analysis         | REAL-TIME ACCESS: Yes (ops)      |
+|                    | GROWTH: High (30-50% annually)                         | ACCESS PATTERN: Full scan,              |  No (analytics)                 |
+|                    | VELOCITY: Very High (10K+ events/sec)                  |  time-range aggregations                |                                  |
+|                    | VARIETY: High - fields added/removed frequently        | PERFORMANCE: Exploratory - seconds      |                                  |
+|                    |                                                         |  to minutes; Ops dashboards - real-time |                                  |
+|--------------------|-----------------------------------------------------------|---------------------------------------------|------------------------------------|
+| IoT SENSOR        | STRUCTURE: Semi-structured/Time-series                 | CONSUMERS: Engineering, Operations,     | FAST QUERIES: Yes (alerts)       |
+| READINGS          | (device_id, timestamp, metrics[], status, location)    |  Maintenance, Analytics                  | FLEXIBLE EXPLORATION: Yes        |
+|                    | VOLUME: Massive (10B+ readings/year)                   | QUERY TYPE: Latest reading by device,   | CONSISTENT SCHEMA: No            |
+|                    | GROWTH: High (20-40% as devices added)                 |  anomaly detection, trends              | REAL-TIME ACCESS: Yes (ops)      |
+|                    | VELOCITY: Very High (50K+ events/sec)                  | ACCESS PATTERN: Latest value (freq),    |  No (analytics)                |
+|                    | VARIETY: High - metrics change with firmware           |  historical range scans (rare)          |                                  |
+|                    |                                                         | PERFORMANCE: Alerts - sub-second,       |                                  |
+|                    |                                                         |  analytics - minutes OK                |                                  |
+|--------------------|-----------------------------------------------------------|---------------------------------------------|------------------------------------|
+| SALES             | STRUCTURE: Structured                                  | CONSUMERS: Executives, Finance,         | FAST QUERIES: Yes (<5s)          |
+| REPORTING         | (date, product_id, store_id, quantity, revenue,       |  Sales Management, BI Team              | FLEXIBLE EXPLORATION: Yes        |
+|                    |  cost, profit, discount, promotion_id)                | QUERY TYPE: Aggregations by day/week/   | CONSISTENT SCHEMA: Yes           |
+|                    | VOLUME: Large (500M+ fact records/year)                |  month, YoY, MoM, drill-down           | REAL-TIME ACCESS: No             |
+|                    | GROWTH: High (20-30% annually)                         | ACCESS PATTERN: Heavy aggregation,      |  (daily is fine)               |
+|                    | VELOCITY: Medium (thousands/hour)                      |  many concurrent users                  |                                  |
+|                    | VARIETY: Low - stable schema                           | PERFORMANCE: <10s for dashboards,      |                                  |
+|                    |                                                         |  sub-second for pre-aggregated         |                                  |
+|--------------------|-----------------------------------------------------------|---------------------------------------------|------------------------------------|
+| SOCIAL MEDIA      | STRUCTURE: Unstructured/Semi-structured                | CONSUMERS: Marketing, Brand,           | FAST QUERIES: No                 |
+| FEED              | (text, hashtags, mentions, images, sentiment,         |  Product, Competitive Intel             | FLEXIBLE EXPLORATION: Yes        |
+|                    |  engagement metrics, author profile)                  | QUERY TYPE: Sentiment trends,          | CONSISTENT SCHEMA: No            |
+|                    | VOLUME: Very High (100M+ posts/year)                   |  brand mentions, competitor analysis   | REAL-TIME ACCESS: Yes            |
+|                    | GROWTH: High (varies by campaigns)                     | ACCESS PATTERN: Ad-hoc text search,    |  (crisis monitoring)           |
+|                    | VELOCITY: High (thousands/hour)                        |  trend detection                        |                                  |
+|                    | VARIETY: Very High - each platform different           | PERFORMANCE: Minutes acceptable,        |                                  |
+|                    |                                                         |  except crisis alerts (real-time)      |                                  |
+|--------------------|-----------------------------------------------------------|---------------------------------------------|------------------------------------|
+| SUPPLY CHAIN      | STRUCTURE: Structured + Semi-structured                | CONSUMERS: Logistics, Procurement,      | FAST QUERIES: Yes (ops)          |
+| EVENTS            | (shipment_id, order_id, carrier, status, location,    |  Customer Service, Analytics            | FLEXIBLE EXPLORATION: Yes        |
+|                    |  eta, delay_reason, temperature, handling_instructions)| QUERY TYPE: Track by ID,               | CONSISTENT SCHEMA: Moderate      |
+|                    | VOLUME: Large (50M+ events/year)                       |  status dashboard, delay analysis      | REAL-TIME ACCESS: Yes (ops)      |
+|                    | GROWTH: Medium (10-15% annually)                       | ACCESS PATTERN: Mix of lookups and     |  No (analytics)                |
+|                    | VELOCITY: High (thousands/hour)                        |  range scans                           |                                  |
+|                    | VARIETY: Moderate - carrier formats vary               | PERFORMANCE: Tracking - <1s,           |                                  |
+|                    |                                                         |  analytics - minutes OK               |                                  |
+|--------------------|-----------------------------------------------------------|---------------------------------------------|------------------------------------|
+|=====================================================================================================================================
+| STEP 2: CLASSIFICATION DECISIONS - STORAGE, ZONE, SCHEMA, INGESTION                                                              |
+|=====================================================================================================================================
+| DATASET            | STORAGE        | ZONE        | SCHEMA STRATEGY  | INGESTION    | REASONING                                                  |
+|====================|================|=============|==================|==============|============================================================|
+| CUSTOMER           | DATA           | SILVER      | SCHEMA-ON-WRITE  | BATCH        | STORAGE: Structured, consistent schema, needs joins       |
+| PROFILES           | WAREHOUSE      |             |                  | (CDC nightly)| ZONE: Cleaned, validated, source of truth                 |
+|                    |                |             |                  |              | SCHEMA: Quality critical, stable structure, non-negotiable|
+|                    |                |             |                  |              | INGESTION: Changes infrequent, batch efficient            |
+|--------------------|----------------|-------------|------------------|--------------|------------------------------------------------------------|
+| ORDER             | DATA           | SILVER      | SCHEMA-ON-WRITE  | STREAMING    | STORAGE: Transactional integrity, ACID required           |
+| TRANSACTIONS      | WAREHOUSE      |             |                  | + BATCH      | ZONE: Cleaned, validated, referential integrity           |
+|                    |                |             |                  |              | SCHEMA: Zero error tolerance, audit required              |
+|                    |                |             |                  |              | INGESTION: Stream for real-time, batch for history       |
+|--------------------|----------------|-------------|------------------|--------------|------------------------------------------------------------|
+| PRODUCT           | DATA           | GOLD        | SCHEMA-ON-WRITE  | STREAMING    | STORAGE: Low-latency API requirements, cache-friendly    |
+| CATALOG           | WAREHOUSE      |             |                  | (CDC)        | ZONE: Curated, business-ready, API-facing                |
+|                    | + REDIS CACHE  |             |                  |              | SCHEMA: Stable, needs consistency across channels         |
+|                    |                |             |                  |              | INGESTION: CDC for real-time inventory/price updates     |
+|--------------------|----------------|-------------|------------------|--------------|------------------------------------------------------------|
+| WEB CLICKSTREAM   | DATA           | BRONZE      | SCHEMA-ON-READ   | STREAMING    | STORAGE: High volume, variable schema, exploratory       |
+|                    | LAKE           | SILVER      | (raw)            | (Kafka)      | ZONE: Bronze for immutable raw, Silver for sessionized   |
+|                    |                | GOLD        | SCHEMA-ON-WRITE  |              | SCHEMA: Raw = flexible; Cleaned = enforced               |
+|                    |                |             | (cleaned)        |              | INGESTION: Streaming only - can't batch at 10K/sec       |
+|--------------------|----------------|-------------|------------------|--------------|------------------------------------------------------------|
+| IoT SENSOR        | DATA           | BRONZE      | SCHEMA-ON-READ   | STREAMING    | STORAGE: Massive volume, firmware drift, cheap storage   |
+| READINGS          | LAKE           | SILVER      | (raw)            | (Kinesis)    | ZONE: Bronze = raw archive; Silver = normalized          |
+|                    | + TIMESCALE    | GOLD        | SCHEMA-ON-WRITE  |              | SCHEMA: Read for ingestion, write for analytics          |
+|                    | (hot path)     |             | (normalized)     |              | INGESTION: Streaming only - real-time alerts needed      |
+|--------------------|----------------|-------------|------------------|--------------|------------------------------------------------------------|
+| SALES             | DATA           | GOLD        | SCHEMA-ON-WRITE  | BATCH        | STORAGE: Aggregated, denormalized, query-optimized      |
+| REPORTING         | WAREHOUSE      |             |                  | (nightly)    | ZONE: Curated, certified KPIs, business-ready           |
+|                    |                |             |                  |              | SCHEMA: Trusted numbers, consistent definitions          |
+|                    |                |             |                  |              | INGESTION: Daily ETL sufficient, no real-time need       |
+|--------------------|----------------|-------------|------------------|--------------|------------------------------------------------------------|
+| SOCIAL MEDIA      | DATA           | BRONZE      | SCHEMA-ON-READ   | STREAMING    | STORAGE: Unstructured, platform variance, exploratory    |
+| FEED              | LAKE           | SILVER      | (raw)            | + BATCH      | ZONE: Bronze = raw API responses; Silver = sentiment     |
+|                    |                | GOLD        | SCHEMA-ON-WRITE  |              | SCHEMA: Read for ingestion, write for analysis           |
+|                    |                |             | (enriched)       |              | INGESTION: Stream for monitoring, batch for trends       |
+|--------------------|----------------|-------------|------------------|--------------|------------------------------------------------------------|
+| SUPPLY CHAIN      | DATA           | BRONZE      | SCHEMA-ON-READ   | STREAMING    | STORAGE: Mixed formats, carrier variations               |
+| EVENTS            | LAKE           | SILVER      | (raw)            | + BATCH      | ZONE: Bronze = carrier files; Silver = normalized        |
+|                    | + POSTGRES     | GOLD        | SCHEMA-ON-WRITE  |              | SCHEMA: Raw flexible, cleaned enforced                   |
+|                    | (tracking API) |             | (standardized)   |              | INGESTION: Stream for tracking, batch for billing        |
+|--------------------|----------------|-------------|------------------|--------------|------------------------------------------------------------|
+|=====================================================================================================================================
+| STEP 3: REVIEW - CONSISTENCY, EDGE CASES, ALTERNATIVES                                                                           |
+|=====================================================================================================================================
+| CONSISTENCY CHECK                                                                                                                  |
+|-------------------------------------------------------------------------------------------------------------------------------------|
+| ✅ SIMILAR DATASETS CLASSIFIED SIMILARLY:                                                                                         |
+|   • Transactional systems (Orders, Customers) → Warehouse + Schema-on-write                                                       |
+|   • High-velocity events (Clickstream, IoT) → Lake + Schema-on-read Bronze → Silver                                               |
+|   • Business metrics (Sales Reporting) → Warehouse + Gold + Batch                                                                 |
+|                                                                                                                                   |
+| ✅ LOGICALLY CONSISTENT:                                                                                                          |
+|   • Schema strategy follows data criticality: Financial = Write, Exploratory = Read                                              |
+|   • Ingestion follows velocity: High velocity = Streaming, Low velocity = Batch                                                  |
+|   • Zone placement follows value: Raw = Bronze, Trusted = Silver, Business = Gold                                                |
+|                                                                                                                                   |
+| ✅ ALIGNS WITH BEST PRACTICES:                                                                                                   |
+|   • Medallion architecture for lake datasets                                                                                     |
+|   • Source of truth in warehouse with ACID                                                                                       |
+|   • CDC for operational data into lake/warehouse                                                                                 |
+|   • Polyglot persistence - right tool for right job                                                                              |
+|-------------------------------------------------------------------------------------------------------------------------------------|
+| EDGE CASES                                                                                                                         |
+|-------------------------------------------------------------------------------------------------------------------------------------|
+| DATASET                    | COULD GO EITHER WAY?           | DECISION TIPPING POINT                      | TRADE-OFFS                    |
+|---------------------------|--------------------------------|---------------------------------------------|-------------------------------|
+| PRODUCT CATALOG           | YES - Lake vs Warehouse        | API latency requirements (<50ms)           | Warehouse = consistent but    |
+|                           |                                | → Chose Warehouse + Redis cache            |  slower; Lake = flexible but  |
+|                           |                                |                                            |  higher latency               |
+|---------------------------|--------------------------------|---------------------------------------------|-------------------------------|
+| SUPPLY CHAIN EVENTS       | YES - Stream vs Batch         | Customer tracking visibility               | Stream = real-time but        |
+|                           |                                | → Hybrid: Stream for tracking,             |  complex; Batch = simple but  |
+|                           |                                |   Batch for analytics                      |  stale                        |
+|---------------------------|--------------------------------|---------------------------------------------|-------------------------------|
+| WEB CLICKSTREAM           | YES - Schema-on-read vs       | Data science need raw events;              | Schema-on-read = flexible but |
+|                           | Schema-on-write               | Analytics need clean sessions              |  complex queries;             |
+|                           |                                | → Both: Bronze = Read, Silver = Write      |  Schema-on-write = clean but  |
+|                           |                                |                                            |  rigid                        |
+|---------------------------|--------------------------------|---------------------------------------------|-------------------------------|
+| IoT SENSOR READINGS       | YES - Time-series DB vs Lake  | Alerting latency (<1s) and historical      | TSDB = fast queries but       |
+|                           |                                | retention (7+ years)                       |  expensive; Lake = cheap but  |
+|                           |                                | → Hybrid: TSDB for hot, Lake for cold      |  slower queries               |
+|-------------------------------------------------------------------------------------------------------------------------------------|
+
+|-------------------------------------------------------------------------------------------------------------------------------------|
+| RECOMMENDATION SUMMARY                                                                                                            |
+|-------------------------------------------------------------------------------------------------------------------------------------|
+| WORKLOAD TYPE              | PRIMARY STORAGE      | ZONE        | SCHEMA STRATEGY  | INGESTION METHOD      |
+|---------------------------|---------------------|-------------|------------------|-----------------------|
+| TRANSACTIONAL SYSTEMS     | Data Warehouse      | Silver      | Schema-on-Write  | CDC + Batch          |
+| (Customers, Orders)       |                     |             |                  |                       |
+|---------------------------|---------------------|-------------|------------------|-----------------------|
+| OPERATIONAL LOOKUPS       | Data Warehouse +    | Gold        | Schema-on-Write  | Streaming CDC        |
+| (Product Catalog)         | Cache               |             |                  |                       |
+|---------------------------|---------------------|-------------|------------------|-----------------------|
+| HIGH-VOLUME EVENTS        | Data Lake           | Bronze      | Schema-on-Read   | Streaming            |
+| (Clickstream, IoT)        |                     | Silver      | Schema-on-Write  | (Kafka/Kinesis)      |
+|---------------------------|---------------------|-------------|------------------|-----------------------|
+| BUSINESS ANALYTICS        | Data Warehouse      | Gold        | Schema-on-Write  | Batch (nightly)      |
+| (Sales Reporting)         |                     |             |                  |                       |
+|---------------------------|---------------------|-------------|------------------|-----------------------|
+| UNSTRUCTURED/SOCIAL       | Data Lake           | Bronze      | Schema-on-Read   | Streaming + Batch    |
+|                           |                     | Silver/Gold | Schema-on-Write  |                       |
+|---------------------------|---------------------|-------------|------------------|-----------------------|
+| LOGISTICS/TRACKING        | Data Lake +         | Bronze      | Schema-on-Read   | Streaming + Batch    |
+|                           | Operational DB      | Silver/Gold | Schema-on-Write  |                       |
+|---------------------------|---------------------|-------------|------------------|-----------------------|
+|=====================================================================================================================================
+| FINAL VERDICT                                                                                                                      |
+|=====================================================================================================================================
+|                                                                                                                                   |
+|   "No single architecture fits all datasets. The optimal solution respects:                                                       |
+|                                                                                                                                   |
+|    • The NATURE of the data (structure, volume, velocity, variety)                                                               |
+|    • The NEEDS of the consumers (latency, consistency, flexibility)                                                              |
+|    • The BUSINESS VALUE (cost of error vs cost of control)                                                                        |
+|                                                                                                                                   |
+|    Our decisions reflect a POLYGLOT PERSISTENCE strategy:                                                                         |
+|    • Data Lake for flexibility and scale → Bronze → Silver                                                                        |
+|    • Data Warehouse for trust and performance → Gold                                                                              |
+|    • Operational databases for transactions → Systems of record                                                                   |
+|    • Caches for speed → Customer-facing applications                                                                              |
+|    • Time-series DBs for specific workloads → IoT hot path                                                                        |
+|                                                                                                                                   |
+|    This is not 'one architecture to rule them all' -                                                                             |
+|    it's 'the right architecture for each job, integrated together.'"                                                              |
+|                                                                                                                                   |
+=====================================================================================================================================
