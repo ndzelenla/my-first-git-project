@@ -1,0 +1,125 @@
+Subscriber
+- Purpose: Represents a phone subscriber (can be caller or receiver)
+- Attributes: subscriber_id, phone_number, name, registration_date
+- Candidate keys: subscriber_id, phone_number
+
+Call
+- Purpose: Represents a single call record
+- Attributes: call_id, caller_id, receiver_id, start_time, duration, call_type_id, tower_id
+- Candidate keys: call_id
+
+CallType
+- Purpose: Represents call type categories (local, STD, ISD)
+- Attributes: call_type_id, call_type_name, description
+- Candidate keys: call_type_id
+
+Tower
+- Purpose: Represents cell tower locations
+- Attributes: tower_id, tower_name, location, latitude, longitude
+- Candidate keys: tower_id
+
+
+Subscriber → Call (as caller)
+- Relationship: One subscriber can make many calls
+- Foreign key: Call.caller_id → Subscriber.subscriber_id
+- Cardinality: 1:many
+- Required: Yes
+
+Subscriber → Call (as receiver)
+- Relationship: One subscriber can receive many calls
+- Foreign key: Call.receiver_id → Subscriber.subscriber_id
+- Cardinality: 1:many
+- Required: Yes
+
+CallType → Call
+- Relationship: One call type can be used by many calls
+- Foreign key: Call.call_type_id → CallType.call_type_id
+- Cardinality: 1:many
+- Required: Yes
+
+Tower → Call
+- Relationship: One tower can handle many calls
+- Foreign key: Call.tower_id → Tower.tower_id
+- Cardinality: 1:many
+- Required: Yes (or optional, depending on requirements)
+
+
+subscribers
+- subscriber_id (PK)
+- phone_number (unique)
+- name
+- registration_date
+
+call_types
+- call_type_id (PK)
+- call_type_name (unique)
+- description
+- base_rate (optional, for pricing)
+
+towers
+- tower_id (PK)
+- tower_name
+- location
+- latitude
+- longitude
+
+calls
+- call_id (PK)
+- caller_id (FK → subscribers.subscriber_id)
+- receiver_id (FK → subscribers.subscriber_id)
+- start_time
+- duration
+- call_type_id (FK → call_types.call_type_id)
+- tower_id (FK → towers.tower_id)
+
+## Example Mermaid syntax:
+erDiagram
+    SUBSCRIBER ||--o{ CALL : "makes (caller)"
+    SUBSCRIBER ||--o{ CALL : "receives (receiver)"
+    CALL_TYPE ||--o{ CALL : "categorized as"
+    TOWER ||--o{ CALL : "handled by"
+    
+    SUBSCRIBER {
+        int subscriber_id PK
+        string phone_number UK
+        string name
+        date registration_date
+    }
+    
+    CALL {
+        int call_id PK
+        int caller_id FK
+        int receiver_id FK
+        datetime start_time
+        int duration
+        int call_type_id FK
+        int tower_id FK
+    }
+    
+    CALL_TYPE {
+        int call_type_id PK
+        string call_type_name UK
+        string description
+    }
+    
+    TOWER {
+        int tower_id PK
+        string tower_name
+        string location
+        decimal latitude
+        decimal longitude
+    }
+
+Why schema is normalized
+
+What normalization benefits you gain - Data Integrity Through Elimination of Redundancy
+How it prevents anomalies - Update Anomaly Prevention,  Insert Anomaly Prevention, Delete Anomaly Prevention
+Why 3NF is appropriate here - Integrity is easier to add later than to retrofit
+
+Where denormalization might be added later 
+
+What analytics queries might Benefit - Query Patterns That Will Eventually Need Optimization
+What denormalized views could help - materialized views
+When you might consider denormalization - Sales reports: Read-only → Denormalized copies acceptable, Dashboard views too
+What trade-offs you'd accept - In scenarioa like Analytics Aggregates, you can denormalize later
+
