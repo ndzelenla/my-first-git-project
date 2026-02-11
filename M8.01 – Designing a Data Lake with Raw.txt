@@ -1,0 +1,145 @@
+Data Lake Fundamentals (10 mins)
+Answer briefly:
+
+What is a data lake?
+
+Define a data lake - A data lake is a centralized repository that stores vast amounts of raw, unprocessed data in its native, original format until it is needed for analysis
+Explain its Purpose - 
+Primary Purposes:
+┌─────────────────────────────────────────────────────────────┐
+│ 1. DATA DEMOCRATIZATION                                    │
+│    Make all organizational data accessible to all users    │
+│    Remove silos between departments                        │
+│                                                             │
+│ 2. FUTURE-PROOFING                                         │
+│    Preserve data for unknown future use cases             │
+│    Don't discard data because today's tools can't use it  │
+│                                                             │
+│ 3. COST-EFFECTIVE SCALING                                  │
+│    Store petabytes at cents per GB                        │
+│    Decouple storage from compute                           │
+│                                                             │
+│ 4. AGILITY                                                 │
+│    Ingest without transformation                           │
+│    Transform only when needed                             │
+└─────────────────────────────────────────────────────────────┘
+Compare to traditional data storage - 
+Data Warehouse: A library - books are cataloged, organized, indexed
+                You know exactly where everything is
+                Takes time to add new books
+                
+Data Lake: A storage unit - everything is in boxes
+           You can dump boxes in quickly
+           You dig through boxes when you need something
+           You might not know what's in every box
+
+Why not store everything in one folder? 
+
+What problems arise from unstructured storage? - can cause data swamps, no data lineage, Access Control nightmare
+Why is organization critical? - Logical seperation, processing Efficiency, data life cycle management
+What happens without zones? -  Cannot find relevant data,Cannot trust data Quality, Cannot determine freshness
+
+What problems do zones solve?
+
+Data quality issues - Bronze = "as received" (trust no one),Silver = "validated" (known quality), Gold = "business certified" (high quality)
+Processing Efficiency - Silver = clean once, use many times,Gold = compute once, query many times, Progressive refinement reduces waste
+Access Control - Bronze: Limited to engineers (raw source data),Silver: Analysts, data scientists (cleaned PII removed),Gold: Business users (aggregates only)
+Data lifecycle Management - Bronze: Cold storage after 30 days (cheap), Silver: Warm storage (queryable),Gold: Hot storage (performance optimized)
+
+
+Step 2: Zone Responsibilities (15 mins)
+Define responsibilities for:
+
+Raw / Bronze Zone
+
+Data format: What format is data stored in? - 	raw/Origiinal format
+Level of validation: What validation is performed? - minimal to none
+Intended consumers: Who uses this data? - Primary consumers like data engineers and advanced data scientists
+Purpose: Why does this zone exist? - immutable Audit Trail, reprocessing, source System offloading, futute unknown use cases
+Characteristics: What makes data "raw"? - no transformations, no Enrichment, source naked
+
+Cleaned / Silver Zone
+
+Data format: What format is data stored in? - columnar, optimized for query
+Level of validation: What validation is performed? - Schema Validation, data Quality, Business rules, duplicate handling
+Intended consumers: Who uses this data? - Data engineers/Analysts/Scientists
+Purpose: Why does this zone exist? - single source of truth, reusable cleaning, Performance optimization, data governance
+Transformations: What cleaning/transformation happens here? - cleaning, casting, deduplication, Enrichment, Schema normalization
+
+Curated / Gold Zone
+
+Data format: What format is data stored in? - consumption-optimized
+Level of validation: What validation is performed? - Business certified, Reconciliation, non negative checks, average sanity, completeness
+Intended consumers: Who uses this data? - Business analysts, executives, customer facing apps, Marketing teams
+Purpose: Why does this zone exist? - biusiness accessibility, Performance at scale, single Version of truth
+Business value: What makes this data "curated"? - Business rules applied, denormalized and consumer Ready, aggregated to desicion grain, time intelligent
+
+Step 3: Folder Structure Design (20 mins)
+# Raw
+/data-lake
+  /raw
+    /sales
+      /year=2024
+        /month=03
+          /day=01
+            /sales_2024_03_01.json
+    /customers
+      /year=2024
+        /month=03
+          /day=01
+            /customers_2024_03_01.csv
+    /products
+      /year=2024
+        /month=03
+          /day=01
+            /products_2024_03_01.json
+# Silver
+  /silver
+    /sales
+      /year=2024
+        /month=03
+          /day=01
+            /sales_cleaned_2024_03_01.parquet
+    /customers
+      /year=2024
+        /month=03
+          /day=01
+            /customers_cleaned_2024_03_01.parquet
+    /products
+      /year=2024
+        /month=03
+          /day=01
+            /products_cleaned_2024_03_01.parquet
+# Gold
+  /gold
+    /sales_summary
+      /year=2024
+        /month=03
+          /sales_summary_2024_03.parquet
+    /customer_360
+      /year=2024
+        /month=03
+          /customer_360_2024_03.parquet
+    /product_catalog
+      /product_catalog_current.parquet
+
+╔════════════╗    ╔════════════╗    ╔════════════╗    ╔════════════╗    ╔════════════╗
+║  SOURCES   ║───▶║   BRONZE   ║───▶║   SILVER   ║───▶║    GOLD    ║───▶║ CONSUMERS  ║
+║            ║    ║            ║    ║            ║    ║            ║    ║            ║
+║ Transaction║    ║ Raw CSV    ║    ║ Parquet    ║    ║ Denormalized║    ║ Dashboards ║
+║ Logs       ║    ║ JSON       ║    ║ Cleaned    ║    ║ Aggregated  ║    ║ Reports    ║
+║ APIs       ║    ║ AVRO       ║    ║ Validated  ║    ║ Business    ║    ║ ML Models  ║
+║ IoT        ║    ║ Immutable  ║    ║ Columnar   ║    ║ Metrics     ║    ║ APIs       ║
+╚════════════╝    ╚════════════╝    ╚════════════╝    ╚════════════╝    ╚════════════╝
+                        │                  │                  │
+                        │ ELT: Spark       │ Aggregation: SQL │
+                        │ Clean, TypeCast  │ Denormalize     │
+                        │ Deduplicate      │ Compute KPIs    │
+                        ▼                  ▼                  ▼
+                    ╔═══════════════════════════════════════════════════════════╗
+                    ║                   TRANSFORMATION LAYERS                   ║
+                    ║  ─────────────────────────────────────────────────────   ║
+                    ║  Bronze → Silver: Data Engineering                         ║
+                    ║  Silver → Gold: Data Modeling / Analytics Engineering    ║
+                    ╚═══════════════════════════════════════════════════════════╝
+
