@@ -1,0 +1,147 @@
+Classify the following as facts or dimensions:
+
+Order amount
+
+Fact or Dimension? - Fact
+Reasoning: Why? - Facts capture the measurements that result from business processes
+How is it used in analytics? - -- SUM: Total Revenue SELECT SUM(order_amount) AS total_revenue FROM orders;
+
+Quantity sold
+
+Fact or Dimension? - Fact
+Reasoning: Why? - Quantity sold is a measurement of business activity
+How is it used in analytics? - -- Units sold by productSELECT product_id,SUM(quantity) AS total_units_sold,....
+
+Customer
+
+Fact or Dimension? - Dimension
+Reasoning: Why? - Customer is an ENTITY that describes WHO performed the transaction
+How is it used in analytics? - -- Customer segments: Group by customer Attributes
+
+
+Product
+
+Fact or Dimension? - Dimension
+Reasoning: Why? - Product is an ENTITY that describes WHAT was purchased
+How is it used in analytics? - heirachical Analysis, product Performance, product attributes as filters
+
+Date
+
+Fact or Dimension? - Dimension
+Reasoning: Why? - Date is a DIMENSION that describes WHEN the measurement occurred
+How is it used in analytics? - time intelligence, calendar vs fiscal, period comparisons
+
+Region
+
+Fact or Dimension? - Dimension
+Reasoning: Why? - Region is a DIMENSION that describes WHERE the transaction occurred
+How is it used in analytics? - Geographic Analysis, regional Performance, territory Management
+
+----- Step 2: Fact Table Design (15 mins)
+Design a fact_sales table:
+
+fact_sales
+- sale_id (PK, surrogate key)
+- customer_id (FK → dim_customer)
+- product_id (FK → dim_product)
+- date_id (FK → dim_date)
+- region_id (FK → dim_region)
+- order_amount (measure)
+- quantity (measure)
+- discount_amount (measure)
+- profit_amount (measure)
+
+--- Step 3: Dimension Tables Design (15 mins)
+Design dimension tables:
+
+dim_customer
+- customer_id (PK, surrogate)
+- customer_name
+- email
+- segment
+- registration_date
+- city
+- state
+- country
+
+dim_product
+- product_id (PK, surrogate)
+- product_name
+- category
+- subcategory
+- brand
+- unit_price
+- unit_cost
+
+dim_date
+- date_id (PK, surrogate)
+- date
+- year
+- quarter
+- month
+- week
+- day_of_week
+- is_holiday
+- is_weekend
+
+dim_region
+- region_id (PK, surrogate)
+- region_name
+- country
+- state
+- city
+- timezone
+
+Step 4: Star Schema Diagram (10 mins)
+Create a star schema diagram (tool or text-based).
+erDiagram
+    FACT_SALES ||--|| DIM_CUSTOMER : "has"
+    FACT_SALES ||--|| DIM_PRODUCT : "contains"
+    FACT_SALES ||--|| DIM_DATE : "occurs on"
+    FACT_SALES ||--|| DIM_REGION : "sold in"
+    
+    FACT_SALES {
+        int sale_id PK
+        int customer_id FK
+        int product_id FK
+        int date_id FK
+        int region_id FK
+        decimal order_amount
+        int quantity
+        decimal discount_amount
+        decimal profit_amount
+    }
+    
+    DIM_CUSTOMER {
+        int customer_id PK
+        string customer_name
+        string email
+        string segment
+        date registration_date
+    }
+    
+    DIM_PRODUCT {
+        int product_id PK
+        string product_name
+        string category
+        string brand
+        decimal unit_price
+    }
+    
+    DIM_DATE {
+        int date_id PK
+        date date
+        int year
+        int quarter
+        int month
+        string day_of_week
+    }
+    
+    DIM_REGION {
+        int region_id PK
+        string region_name
+        string country
+        string state
+    }
+
+
