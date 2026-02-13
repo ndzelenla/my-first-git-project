@@ -1,0 +1,267 @@
+## Scenario 1: Streaming Clickstream Ingestion
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Recommended Format**       | **JSON**                                                                                      |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            | JSON is the ideal choice for streaming clickstream ingestion because:                         |
+|                              | • **Schema flexibility** - Clickstream events often have varying fields; JSON handles this    |
+|                              |   naturally without requiring schema changes                                                  |
+|                              | • **Human readable** - Critical for debugging streaming pipelines and validating events        |
+|                              | • **Web native** - Clickstream comes from web apps where JSON is the standard format          |
+|                              | • **Fast writes** - Simple append operations to files/kafka topics                           |
+|                              | • **Immediate availability** - No transformation needed before querying                       |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Write Pattern**            | • **High velocity** - Millions of events per hour                                             |
+|                              | • **Append-only** - Each event written once, never updated                                    |
+|                              | • **Continuous** - 24/7 stream, no batch windows                                             |
+|                              | • **Simple writes** - Serialize event object to JSON, append to file/kafka                    |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Read Pattern**             | • **Initially exploratory** - Data scientists exploring raw events                            |
+|                              | • **Debugging** - Checking specific user sessions or error conditions                         |
+|                              | • **Sampling** - Looking at recent events to understand patterns                              |
+|                              | • **Low concurrency** - Few users querying raw stream directly                                |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Schema Evolution**         | • **Frequent changes** - Marketing teams add new tracking parameters                          |
+|                              | • **Optional fields** - Many events have different fields (page views vs clicks)              |
+|                              | • **No schema enforcement** - JSON allows fields to appear/disappear                          |
+|                              | • **Forward/backward compatible** - Old readers ignore new fields, new readers handle missing |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Performance Requirements** | • **Write speed critical** - Must keep up with incoming stream                                |
+|                              | • **Read speed less critical** - Exploratory queries can be slower                            |
+|                              | • **No aggregation needed** - Raw event access only                                           |
+|                              | • **Latency sensitive** - Events available immediately                                        |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Large storage footprint (field names       | • Query performance on large history         |
+|                              |   repeated in every event)                    | • Compression efficiency                     |
+|                              | • No compression built-in                     | • Analytical capabilities                    |
+|                              | • Slower to parse than binary formats         | • Schema enforcement                         |
+|                              | • Not optimized for analytics                 |                                              |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Why not other formats?**   | • **CSV** - Poor schema evolution, can't handle nested clickstream data, position dependent    |
+|                              | • **Parquet/ORC** - Too heavy for ingestion, schema rigid, not human readable, write overhead |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Real-world example**       | Kafka topics with JSON messages, landed in cloud storage as JSON files (bronze layer)         |
+=====================================================================================================================
+
+#### Scenario 2: Daily Sales Analytics
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Recommended Format**       | **Parquet** (or ORC)                                                                          |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            | Parquet is the ideal choice for daily sales analytics because:                               |
+|                              | • **Column pruning** - Queries need only 5-10 of 50+ columns, Parquet reads only those        |
+|                              | • **Compression** - 5-15x compression ratio drastically reduces storage costs                  |
+|                              | • **Predicate pushdown** - Min/max statistics skip irrelevant row groups                      |
+|                              | • **Analytics performance** - Optimized for aggregations on large datasets                     |
+|                              | • **Cost efficiency** - Less data read = lower cloud processing costs                          |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Access Pattern**           | • **Batch reads** - Daily ETL jobs and reporting queries                                      |
+|                              | • **Analytical** - Aggregations, group by, filters on dimensions                              |
+|                              | • **Column-specific** - Most queries need subset of columns                                   |
+|                              | • **Large scans** - Processing billions of rows per query                                     |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Common Query Patterns**    | • `SELECT region, SUM(sales) FROM sales WHERE date = '2024-01-01' GROUP BY region`           |
+|                              | • `SELECT product_id, AVG(price) FROM sales WHERE date BETWEEN '2024-01-01' AND '2024-01-31'` |
+|                              | • `SELECT COUNT(*) FROM sales WHERE amount > 1000`                                           |
+|                              | • All patterns benefit from column pruning and predicate pushdown                             |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Storage Cost Concerns**    | • **Raw data volume** - Billions of rows × 50+ columns = petabytes                            |
+|                              | • **Parquet compression** - Reduces storage 5-15x, from petabytes to terabytes                |
+|                              | • **Long-term retention** - Years of history becomes feasible with compression                |
+|                              | • **Cloud storage costs** - 90% reduction in monthly bills                                     |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Performance Requirements** | • **Query speed** - Sub-minute response for common reports                                     |
+|                              | • **Throughput** - Handle multiple concurrent analysts                                         |
+|                              | • **Cost per query** - Minimize data scanned to control costs                                  |
+|                              | • **Scalability** - Linear performance as data grows                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Batch-oriented (not real-time)              | • Human readability                          |
+|                              | • Write overhead (encoding/compression)       | • Single-row update capability               |
+|                              | • Requires processing framework                | • Universal compatibility (specialized tools)|
+|                              | • Schema must be known at write time           | • Simple text editing                         |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Why not other formats?**   | • **CSV** - Terrible performance (full scans), no compression, huge storage costs, slow queries |
+|                              | • **JSON** - Parsing overhead, field name repetition, 5-10x larger, poor aggregation speed     |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Real-world example**       | Daily sales data transformed from raw JSON/CSV to Parquet in data lake (silver/gold layer)    |
+=====================================================================================================================
+
+## Scenario 3: Data Exchange with External Partners
+
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Recommended Format**       | **CSV**                                                                                       |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            | CSV is the ideal choice for data exchange with external partners because:                    |
+|                              | • **Universal compatibility** - Every tool, from Excel to databases, reads CSV                |
+|                              | • **Human readable** - Partners can open in spreadsheet software immediately                  |
+|                              | • **No special tools** - Works with basic text editors, no proprietary software needed        |
+|                              | • **Simple to process** - Any programming language can parse CSV without libraries            |
+|                              | • **Well-understood** - Business users know how to work with CSV files                        |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Interoperability Requirements** | • **Multiple partner systems** - Partners use different BI tools, databases, spreadsheets  |
+|                              | • **No assumptions** - Cannot assume partners have Parquet readers or JSON parsers           |
+|                              | • **Self-contained** - One file format that works everywhere                                  |
+|                              | • **Long-term accessibility** - CSV will be readable in 20 years                             |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Partner Tools**            | • **Excel/Google Sheets** - Most common tool for business users                                |
+|                              | • **Various databases** - Some partners import to MySQL, PostgreSQL, etc.                     |
+|                              | • **Custom applications** - Partners may have in-house tools                                   |
+|                              | • **Basic text editors** - Some may just view the data                                          |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Human Readability**        | • **Critical for this scenario** - Partners need to inspect data manually                      |
+|                              | • **Headers row** - Clear column names for context                                             |
+|                              | • **Simple structure** - Easy to understand tabular format                                     |
+|                              | • **No binary gibberish** - Can open in any text editor                                        |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Data Volume**              | • **Moderate** - Not big data scale (GBs, not TBs/PBs)                                         |
+|                              | • **Manageable** - Fits in memory of typical desktop/laptop                                    |
+|                              | • **Email-friendly** - Can be shared via email or FTP                                          |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Larger file size (no compression)           | • Analytics performance                      |
+|                              | • No data types (all text)                    | • Column pruning capability                   |
+|                              | • No nested structures                         | • Compression efficiency                     |
+|                              | • Manual schema management                     | • Advanced optimizations                      |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Why not other formats?**   | • **JSON** - Less human readable for tabular data, more complex for business users            |
+|                              | • **Parquet/ORC** - Binary format, requires special tools, not human readable, overkill        |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Best Practices**           | • Include header row with column names                                                         |
+|                              | • Use UTF-8 encoding                                                                           |
+|                              | • Quote fields containing commas or newlines                                                    |
+|                              | • Provide data dictionary separately                                                           |
+|                              | • Consider compressing as .zip for transfer (partners can unzip)                               |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Real-world example**       | Monthly sales report exported as CSV and emailed to retail partners for their own analysis     |
+=====================================================================================================================
+
+### Scenario 4: Ad-Hoc Analyst Exploration
+
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Recommended Format**       | **JSON** (or CSV for tabular data)                                                             |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            | JSON (or CSV) is ideal for ad-hoc exploration because:                                       |
+|                              | • **Human readable** - Analysts can open files directly and understand the structure          |
+|                              | • **Schema flexibility** - New datasets often have messy, evolving schemas                    |
+|                              | • **Self-describing** - Field names in JSON show what data is available                       |
+|                              | • **Quick to sample** - Can read first N records without special tools                        |
+|                              | • **No transformation needed** - Explore raw data as-is, no ETL delay                         |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Exploration Pattern**      | • **Iterative** - Analysts run many quick, small queries to understand data                   |
+|                              | • **Sampling** - Look at first 1000 rows to see structure and content                         |
+|                              | • **Schema discovery** - What fields exist? What are their types?                             |
+|                              | • **Data quality checks** - Nulls, outliers, patterns                                         |
+|                              | • **Hypothesis testing** - Quick counts and distributions                                     |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Schema Flexibility**       | • **Critical for exploration** - New datasets rarely have perfect schema                      |
+|                              | • **JSON handles** - Missing fields, nested structures, varying types                         |
+|                              | • **CSV handles** - Simple tabular with optional headers                                      |
+|                              | • **No schema enforcement** - Analysts can see data as-is, not forced into rigid structure    |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Human Readability**        | • **Essential** - Analysts need to visually inspect data                                       |
+|                              | • **JSON** - Clear hierarchical structure with field names                                     |
+|                              | • **CSV** - Simple table format with headers                                                   |
+|                              | • **Can open in any text editor or IDE**                                                       |
+|                              | • **No binary decoding needed**                                                                |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Data Volumes**             | • **Small to medium** - MBs to low GBs                                                         |
+|                              | • **Fits on laptop** - Can download and explore locally                                        |
+|                              | • **Quick to transfer** - No need for distributed computing                                    |
+|                              | • **Sample-able** - Can work with subsets if needed                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Limited to small/medium data               | • Performance at scale                       |
+|                              | • No optimization for analytics               | • Column pruning capability                   |
+|                              | • Larger file sizes                           | • Advanced compression                        |
+|                              | • Manual exploration only                      | • Predicate pushdown                          |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Why not Parquet/ORC?**     | • **Binary format** - Can't visually inspect raw data                                          |
+|                              | • **Requires tools** - Need specialized readers or code to view                                |
+|                              | • **Schema rigid** - Must know schema before writing                                           |
+|                              | • **Overkill** - Too heavy for small datasets and exploration                                  |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Best Practices**           | • Use JSON for nested/semi-structured data                                                    |
+|                              | • Use CSV for simple tabular data with headers                                                 |
+|                              | • Sample data first (head -n 1000) to understand structure                                     |
+|                              | • Document schema discoveries for later transformation                                         |
+|                              | • Once understood, plan conversion to Parquet for scale                                        |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Real-world example**       | Data scientist downloads a new customer dataset as JSON, explores in Jupyter notebook          |
+|                              | to understand fields and patterns before designing production pipeline                         |
+=====================================================================================================================
+
+### Scenario 5: Long-Term Archival Storage
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Recommended Format**       | **Parquet** (with high compression like Gzip/Zstd)                                            |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            | Parquet is ideal for archival storage because:                                               |
+|                              | • **Best compression** - 10-15x smaller than raw formats, minimizing storage costs            |
+|                              | • **Columnar** - When accessed, queries can be efficient                                      |
+|                              | • **Splittable** - Can be processed in parallel when needed                                   |
+|                              | • **Open format** - Not proprietary, will be readable in the future                           |
+|                              | • **Self-describing** - Schema stored in metadata, no external documentation needed           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Primary Concern**          | • **Storage cost** - Absolute priority for archival                                           |
+|                              | • **Compression ratio** - Maximize to minimize bytes stored                                   |
+|                              | • **Long-term stability** - Format must be readable in 10+ years                              |
+|                              | • **Retrieval cost** - When accessed, shouldn't require full decompression                    |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Access Pattern**           | • **Rarely accessed** - Maybe once a year for audits or compliance checks                     |
+|                              | • **Batch queries** - When accessed, typically full-year analysis                             |
+|                              | • **Analytical** - Aggregations over long time periods                                        |
+|                              | • **No point queries** - Rarely need single records                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Storage Requirements**     | • **Minimize bytes** - Every byte costs money over decades                                    |
+|                              | • **Cold storage tier** - Often moved to cheaper storage classes                              |
+|                              | • **Retention periods** - 7-10 years common for compliance                                    |
+|                              | • **No updates** - Immutable data, append-only                                                |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Query Patterns (when accessed)** | • **Year-over-year comparisons** - `SELECT SUM(revenue) FROM archive WHERE year = 2020`   |
+|                              | • **Regulatory audits** - `SELECT * FROM transactions WHERE customer_id = 'X' AND year=2019` |
+|                              | • **Trend analysis** - Aggregations across multiple years                                     |
+|                              | • **All benefit from column pruning** - Usually need few columns                              |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Compression Considerations** | • **Use maximum compression** - Gzip or Zstd with high levels                                 |
+|                              | • **Columnar compression** - Parquet's RLE, dictionary, delta encoding                        |
+|                              | • **Expected ratios** - 10-15x vs CSV, 5-8x vs JSON                                           |
+|                              | • **Example** - 10 TB raw CSV → 700 GB - 1 TB Parquet                                        |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Long-term Stability**      | • **Open source** - Parquet is Apache project, widely adopted                                  |
+|                              | • **Well-documented** - Specification publicly available                                       |
+|                              | • **Multiple implementations** - Java, C++, Python, etc.                                      |
+|                              | • **No vendor lock-in** - Not proprietary to any cloud provider                                |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Higher write cost (compression)             | • Human readability                          |
+|                              | • Need processing framework to read           | • Simple access (requires tools)             |
+|                              | • Schema must be stable                        | • Single-row updates (not needed)            |
+|                              | • Batch-oriented                               | • Real-time access                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Why not other formats?**   | • **CSV** - 10-15x larger, no compression, takes too much space/cost                          |
+|                              | • **JSON** - 5-10x larger, repeated field names waste space                                   |
+|                              | • **ORC** - Similar to Parquet, but slightly less common, still viable                         |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Best Practices**           | • Use highest compression (Gzip/Zstd level 9)                                                  |
+|                              | • Partition by year/month for query efficiency when accessed                                   |
+|                              | • Store in cold storage tier (S3 Glacier, Azure Archive, etc.)                                 |
+|                              | • Maintain metadata catalog for discovery                                                      |
+|                              | • Test restore process periodically                                                            |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Real-world example**       | Financial institution stores 7 years of transaction data in Parquet with Gzip compression,     |
+|                              | reducing 50 PB of raw data to 4 PB, saving millions in storage costs                           |
+=====================================================================================================================
