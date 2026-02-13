@@ -1,0 +1,606 @@
+### Step 1: Column Pruning (15 mins)
+## Explain the concept:
+=====================================================================================================================
+| Aspect                    | Explanation                                                                           |
+|---------------------------|--------------------------------------------------------------------------------------------------------|
+| **Definition**            | Column pruning is an optimization technique where a query engine reads only the columns        |
+|                           | explicitly required by a query, skipping all other columns entirely.                          |
+|---------------------------|--------------------------------------------------------------------------------------------------------|
+| **What it means in practice** | When executing a query, the system identifies which columns are needed for SELECT,           |
+|                           | WHERE, GROUP BY, and JOIN clauses, and only retrieves those specific columns from storage.    |
+|                           | All other columns are ignored (pruned) and never read from disk.                              |
+|---------------------------|--------------------------------------------------------------------------------------------------------|
+| **Concrete example**      | A table with 100 columns storing customer data.                                               |
+|                           | Query: `SELECT name, email FROM customers`                                                    |
+|                           |                                                                                                |
+|                           | **With column pruning:** Reads ONLY the name and email columns (2 columns)                    |
+|                           | **Without column pruning:** Reads ALL 100 columns, then discards 98                           |
+|---------------------------|--------------------------------------------------------------------------------------------------------|
+| **The benefits**          | ✓ **Reduced I/O**: 90-99% less data read from disk                                            |
+|                           | ✓ **Faster queries**: Less data to transfer over network and process                          |
+|                           | ✓ **Lower memory usage**: Only required data loaded into memory                               |
+|                           | ✓ **Cost savings**: Less data processed = lower compute costs                                 |
+|                           | ✓ **Better cache utilization**: More relevant data fits in CPU cache                          |
+|                           | ✓ **Improved concurrency**: More queries can run simultaneously with fewer resources          |
+=====================================================================================================================
+
+### Why columnar formats enable it:
+=====================================================================================================================
+| Aspect                          | Explanation                                                                       |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **Columnar storage structure**  | In columnar formats (Parquet, ORC, Arrow), data is organized by columns rather than rows.     |
+|                                 | All values for a single column are stored together in contiguous blocks on disk,              |
+|                                 | creating a column-wise layout instead of a row-wise layout.                                   |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **How columns are stored separately** | Each column exists as an independent storage unit:                                     |
+|                                 |                                                                                               |
+|                                 | ```                                                                                           |
+|                                 | Columnar Storage Layout on Disk:                                                              |
+|                                 | ┌─────────────────────────────────────────────────────┐                                       |
+|                                 | │ Column A: [A1, A2, A3, A4, A5, A6, A7, A8, A9, A10] │  ← All values of column A together  |
+|                                 | ├─────────────────────────────────────────────────────┤                                       |
+|                                 | │ Column B: [B1, B2, B3, B4, B5, B6, B7, B8, B9, B10] │  ← All values of column B together  |
+|                                 | ├─────────────────────────────────────────────────────┤                                       |
+|                                 | │ Column C: [C1, C2, C3, C4, C5, C6, C7, C8, C9, C10] │  ← All values of column C together  |
+|                                 | ├─────────────────────────────────────────────────────┤                                       |
+|                                 | │ Column D: [D1, D2, D3, D4, D5, D6, D7, D8, D9, D10] │  ← All values of column D together  |
+|                                 | └─────────────────────────────────────────────────────┘                                       |
+|                                 | ```                                                                                           |
+|                                 |                                                                                               |
+|                                 | Each column is physically separated and can be accessed independently.                       |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **How this enables selective reading** | Because columns are stored as independent units, the query engine can:                 |
+|                                 |                                                                                               |
+|                                 | 1. **Parse the query** to identify exactly which columns are needed                          |
+|                                 | 2. **Use the file metadata** (footer) to locate the disk offsets of ONLY those columns       |
+|                                 | 3. **Seek directly** to the start position of each required column block                     |
+|                                 | 4. **Read only those column blocks** from disk                                               |
+|                                 | 5. **Skip all other columns** entirely - they never touch the disk                           |
+|                                 | 6. **Reconstruct** only the needed columns in memory for the result set                      |
+|                                 |                                                                                               |
+|                                 | This is possible because there's no physical dependency between columns in storage.          |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **Visual example**              | **Query:** `SELECT ColumnB, ColumnD FROM table`                                              |
+|                                 |                                                                                               |
+|                                 | ```                                                                                           |
+|                                 | Columnar Read Pattern:                                                                        |
+|                                 | ┌─────────────────────────────────────────────────────┐                                       |
+|                                 | │ Column A: ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │ ← SKIPPED (not accessed)              |
+|                                 | ├─────────────────────────────────────────────────────┤                                       |
+|                                 | │ Column B: [████████████████████████████████████]  │ ← READ FULLY (required)                |
+|                                 | ├─────────────────────────────────────────────────────┤                                       |
+|                                 | │ Column C: ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │ ← SKIPPED (not accessed)              |
+|                                 | ├─────────────────────────────────────────────────────┤                                       |
+|                                 | │ Column D: [████████████████████████████████████]  │ ← READ FULLY (required)                |
+|                                 | └─────────────────────────────────────────────────────┘                                       |
+|                                 | ```                                                                                           |
+|                                 |                                                                                               |
+|                                 | **Result:** Only 2 of 4 columns are read → 50% I/O reduction                                 |
+|                                 |                                                                                               |
+|                                 | **With 100 columns, query needing 3 columns:**                                                |
+|                                 | ```                                                                                           |
+|                                 | Before Read: [Col1][Col2][Col3][Col4][Col5]...[Col100]                                       |
+|                                 | After Pruning: [░░░░][████][░░░░][████][░░░░]...[████]                                       |
+|                                 |                ↑      ↑      ↑      ↑              ↑                                         |
+|                                 |            Skipped  Read   Skipped  Read         Read                                        |
+|                                 |                    (Col2)          (Col4)        (Col100)                                    |
+|                                 | ```                                                                                           |
+|                                 | **I/O Savings:** 97% less data read (only 3 of 100 columns)                                  |
+=====================================================================================================================
+
+### Why row-based formats cannot:
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│              WHY ROW-BASED FORMATS CANNOT PRUNE COLUMNS                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                   │
+│  ROW-BASED STORAGE (PHYSICAL LAYOUT)                                            │
+│  ─────────────────────────────────────────────────────────────────────────────── │
+│  Disk Blocks:                                                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ Row1: C1 C2  │  │ Row2: C1 C2  │  │ Row3: C1 C2  │  │ Row4: C1 C2  │  ...   │
+│  │      C3 C4   │  │      C3 C4   │  │      C3 C4   │  │      C3 C4   │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘       │
+│      Block 1           Block 2           Block 3           Block 4             │
+│                                                                                 │
+│  THE PROBLEM: To read Column 2 from all rows:                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ Row1: [█]█▓▓│  │ Row2: [█]█▓▓│  │ Row3: [█]█▓▓│  │ Row4: [█]█▓▓│  ...   │
+│  │      ▓▓▓▓   │  │      ▓▓▓▓   │  │      ▓▓▓▓   │  │      ▓▓▓▓   │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘       │
+│      Must read    Must read    Must read    Must read                           │
+│      entire block entire block entire block entire block                        │
+│      to get [█]    to get [█]    to get [█]    to get [█]                       │
+│                                                                                 │
+│  KEY CONSTRAINT: Disk reads are block-oriented. You cannot read                │
+│  part of a block - the entire block comes with the read operation.             │
+│  Since columns are interleaved within rows, every block contains               │
+│  all columns, forcing full reads for every query.                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+#### Step 2: Predicate Pushdown (15 mins)
+## Explain the concept:
+=====================================================================================================================
+| Aspect                    | Explanation                                                                           |
+|---------------------------|-------------------------------------------------------------------------------------------------------|
+| **Definition**            | Predicate pushdown is an optimization technique where filtering conditions (WHERE clause predicates)  |
+|                           | are pushed down to the storage layer, allowing data to be filtered at the file level BEFORE          |
+|                           | it is read into memory or processed by the query engine.                                             |
+|---------------------------|-------------------------------------------------------------------------------------------------------|
+| **What it means in practice** | Instead of reading all data and then filtering it, the query engine first checks metadata          |
+|                           | (like min/max statistics) at the file, row group, or page level to determine if a block contains    |
+|                           | any data that satisfies the filter condition. Blocks that cannot contain matching data are           |
+|                           | skipped entirely - they are never read from disk.                                                    |
+|                           |                                                                                                      |
+|                           | The filtering happens at the storage layer, as close to the data as possible, minimizing            |
+|                           | the amount of data that must be transferred through the system.                                      |
+|---------------------------|-------------------------------------------------------------------------------------------------------|
+| **Concrete example**      | **Table**: sales table with 10 years of data (2015-2024), 1 billion rows, stored in Parquet format   |
+|                           | **Query**: `SELECT * FROM sales WHERE order_date >= '2024-01-01'`                                   |
+|                           |                                                                                                      |
+|                           | **Without predicate pushdown:**                                                                      |
+|                           | - Read ALL 1 billion rows from disk (10 years of data)                                              |
+|                           | - Transfer all data to query engine                                                                 |
+|                           | - Apply filter in memory                                                                            |
+|                           | - Keep only 2024 data (1 year), discard 9 years                                                     |
+|                           | - **I/O wasted**: 90% of data read but discarded                                                   |
+|                           |                                                                                                      |
+|                           | **With predicate pushdown:**                                                                         |
+|                           | - Check metadata: each file/row group stores min/max order_date                                     |
+|                           | - Identify which files/row groups contain 2024 data                                                 |
+|                           | - Read ONLY those files/row groups                                                                  |
+|                           | - Skip all data from 2015-2023 completely                                                           |
+|                           | - **I/O saved**: 90% of data never touched disk                                                    |
+|---------------------------|-------------------------------------------------------------------------------------------------------|
+| **The benefits**          | ✓ **Massive I/O reduction**: Skip entire files, row groups, and pages that don't match filters      |
+|                           |   - For time-series data: 90-99% I/O reduction when filtering on date                               |
+|                           |   - For categorical filters: skip all blocks where category doesn't appear                          |
+|                           |                                                                                                      |
+|                           | ✓ **Faster queries**: Less data to read = less I/O wait time                                        |
+|                           |   - Queries on large datasets can finish in seconds instead of minutes/hours                        |
+|                           |                                                                                                      |
+|                           | ✓ **Lower memory usage**: Only relevant data loaded into memory                                     |
+|                           |   - Reduces memory pressure and allows more concurrent queries                                      |
+|                           |                                                                                                      |
+|                           | ✓ **Reduced network transfer**: In distributed systems, less data shuffled between nodes            |
+|                           |   - Minimizes network bottlenecks in cloud environments                                             |
+|                           |                                                                                                      |
+|                           | ✓ **Cost savings**: Less data processed = lower compute costs                                       |
+|                           |   - In cloud data lakes, you pay for data scanned                                                  |
+|                           |   - Predicate pushdown directly reduces your bill                                                   |
+|                           |                                                                                                      |
+|                           | ✓ **Better resource utilization**: CPU not wasted on filtering data that never should have           |
+|                           |   been read in the first place                                                                      |
+=====================================================================================================================
+
+## How Parquet metadata helps:
+=====================================================================================================================
+| Aspect                          | Explanation                                                                       |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **What metadata does Parquet store?** | Parquet stores metadata at multiple levels (file, row group, column, page):                |
+|                                 |                                                                                               |
+|                                 | **File-level metadata** (in footer):                                                         |
+|                                 | - Schema definition (column names, data types, nesting)                                      |
+|                                 | - Total number of rows in the file                                                           |
+|                                 | - Key-value application metadata                                                              |
+|                                 | - Version and format information                                                              |
+|                                 | - Offset locations of all row groups                                                          |
+|                                 |                                                                                               |
+|                                 | **Row group metadata** (each row group):                                                      |
+|                                 | - Number of rows in the row group                                                            |
+|                                 | - Total size in bytes                                                                         |
+|                                 | - Column chunk metadata for each column in the row group                                     |
+|                                 | - Offset and size of each column chunk                                                        |
+|                                 |                                                                                               |
+|                                 | **Column chunk metadata** (each column within a row group):                                   |
+|                                 | - File offset where column data starts                                                        |
+|                                 | - Compressed and uncompressed sizes                                                           |
+|                                 | - Encoding types used (dictionary, RLE, plain, etc.)                                         |
+|                                 | - Number of pages in the column chunk                                                         |
+|                                 | - Column statistics (min, max, null count, etc.)                                             |
+|                                 | - Dictionary page offset (if dictionary encoding used)                                       |
+|                                 |                                                                                               |
+|                                 | **Page-level metadata** (each data/dictionary page):                                          |
+|                                 | - Page type (data page, dictionary page, index page)                                         |
+|                                 | - Number of values in the page                                                                |
+|                                 | - Encoding of the page                                                                        |
+|                                 | - Page size (compressed/uncompressed)                                                         |
+|                                 | - Page-level statistics (optional)                                                            |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **What statistics are available?** | Parquet stores rich statistics for each column chunk (and optionally per page):             |
+|                                 |                                                                                               |
+|                                 | **Basic statistics (always present):**                                                        |
+|                                 | - **min**: Minimum value in the column chunk                                                 |
+|                                 | - **max**: Maximum value in the column chunk                                                 |
+|                                 | - **null_count**: Number of null values                                                      |
+|                                 | - **distinct_count**: Approximate number of distinct values (optional)                       |
+|                                 | - **max_value**: Same as max (for compatibility)                                             |
+|                                 | - **min_value**: Same as min (for compatibility)                                             |
+|                                 |                                                                                               |
+|                                 | **Optional statistics** (can be enabled):                                                     |
+|                                 | - **sum**: Sum of values (for numeric columns)                                               |
+|                                 | - **bloom_filter**: Probabilistic structure for existence checks                             |
+|                                 |                                                                                               |
+|                                 | **Statistics are stored for:**                                                                |
+|                                 | - Each column chunk (at row group level)                                                     |
+|                                 | - Optionally, each page (finer granularity for better skipping)                              |
+|                                 |                                                                                               ||---------------------------------|-----------------------------------------------------------------------------------------------|
+| **How can these be used for filtering?** | The query engine uses statistics to skip data at multiple granularities:                  
+|                                 |                                                                                               |
+|                                 | **1. File-level skipping:**                                                                   |
+|                                 | - Query has filter `WHERE order_date >= '2024-06-01'`                                        |
+|                                 | - Engine reads file footer metadata                                                           |
+|                                 | - Checks per-file or per-row-group min/max of order_date                                     |
+|                                 | - If file's max date < '2024-06-01' → Entire file skipped                                    |
+|                                 | - If file's min date > '2024-06-01' → Entire file kept (all rows match)                      |
+|                                 |                                                                                               |
+|                                 | **2. Row group-level skipping:**                                                              |
+|                                 | - Within a file, different row groups have different date ranges                             |
+|                                 | - Engine checks min/max per row group                                                         |
+|                                 | - Only reads row groups where date range overlaps with filter                                |
+|                                 |                                                                                               |
+|                                 | **3. Page-level skipping (if enabled):**                                                      |
+|                                 | - Even within a row group, different pages may have distinct ranges                          |
+|                                 | - Page-level statistics enable even finer-grained skipping                                   |
+|                                 |                                                                                               |
+|                                 | **4. Dictionary filtering:**                                                                  |
+|                                 | - For low-cardinality columns, dictionary pages contain all distinct values                  |
+|                                 | - Can check if filter value exists in dictionary before reading data pages                   |
+|                                 |                                                                                               |
+|                                 | **5. Bloom filter checking (if available):**                                                  |
+|                                 | - For equality filters like `WHERE user_id = 12345`                                          |
+|                                 | - Bloom filter quickly tells if value might exist in the block                               |
+|                                 | - Avoids reading blocks that definitely don't contain the value                              |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **Example of metadata usage**  | **Example 1: Date range filtering**                                                          |
+|                                 | ```                                                                                           |
+|                                 | Query: SELECT * FROM sales WHERE order_date BETWEEN '2024-01-01' AND '2024-01-31'            |
+|                                 |                                                                                               |
+|                                 | File structure:                                                                               |
+|                                 | ┌─────────────────────────────────────────────────────────────────┐                          
+|                                 | │ File footer metadata:                                         │                          |
+|                                 | │   Row Group 1: order_date min=2023-10-01, max=2023-12-31    │                          |
+|                                 | │   Row Group 2: order_date min=2024-01-01, max=2024-03-31    │ ← MATCH                     |
+|                                 | │   Row Group 3: order_date min=2024-04-01, max=2024-06-30    │                          |
+|                                 | └─────────────────────────────────────────────────────────────────┘                          
+|                                 |                                                                                               |
+|                                 | Result: Only Row Group 2 is read. Row Groups 1 and 3 are skipped.                            |
+|                                 | I/O savings: ~66%                                                                             |
+|                                 | ```                                                                                           |
+|                                 |                                                                                               |
+
+
+##  Why it reduces data scanned:
+=====================================================================================================================
+| Aspect                          | Explanation                                                                       |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **How predicates are applied early** | Instead of waiting until data is loaded into memory, predicates are evaluated at the       |
+|                                 | storage layer before any data is read. The query engine uses metadata to determine           |
+|                                 | which data blocks could possibly satisfy the filter conditions.                               |
+|                                 |                                                                                               |
+|                                 | **Early filtering process:**                                                                  |
+|                                 | ```                                                                                           |
+|                                 | Query: SELECT * FROM table WHERE date >= '2024-01-01'                                        |
+|                                 |                                                                                               |
+|                                 | TRADITIONAL APPROACH (Late Filtering):                                                       |
+|                                 | Disk → Read ALL data → Transfer to memory → Apply filter → Return results                    |
+|                                 |         [████████████████████]    [████████████████████]    [░░░░░░░░]                       |
+|                                 |         100% read                100% transferred           80% discarded                    |
+|                                 |                                                                                               |
+|                                 | PREDICATE PUSHDOWN (Early Filtering):                                                        |
+|                                 | Metadata check → Identify matching blocks → Read ONLY matches → Return results               |
+|                                 | [██░░░░░░░░░░░░░░░░░░░░]         [████]                       [████]                        |
+|                                 | Metadata scan (tiny)            20% read                     100% kept                       |
+|                                 | ```                                                                                           |
+|                                 |                                                                                               |
+|                                 | The predicate travels down to the storage layer - hence "pushdown" - and filtering           |
+|                                 | happens as close to the physical data as possible.                                            |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **Row group skipping**         | Row groups are horizontal partitions of data (typically 500MB - 1GB, millions of rows).       |
+|                                 | Each row group stores min/max statistics for every column.                                    |
+|                                 |                                                                                               |
+|                                 | **How row group skipping works:**                                                             |
+|                                 | ```                                                                                           |
+|                                 | File with 5 row groups:                                                                       |
+|                                 | ┌────────────────────────────────────────────────────────────────────────────────────┐        |
+|                                 | │ Row Group 1: date min=2023-01-01, max=2023-06-30  │  amount min=10, max=1000      │        |
+|                                 | │ Row Group 2: date min=2023-07-01, max=2023-12-31  │  amount min=5,  max=800       │        |
+|                                 | │ Row Group 3: date min=2024-01-01, max=2024-06-30  │  amount min=50, max=5000      │        |
+|                                 | │ Row Group 4: date min=2024-07-01, max=2024-12-31  │  amount min=100, max=10000    │        |
+|                                 | │ Row Group 5: date min=2025-01-01, max=2025-03-31  │  amount min=200, max=20000    │        |
+|                                 | └────────────────────────────────────────────────────────────────────────────────────┘        |
+|                                 |                                                                                               |
+|                                 | Query: SELECT * FROM table WHERE date >= '2024-01-01' AND date <= '2024-12-31'               |
+|                                 |                                                                                               |
+|                                 | Row group evaluation:                                                                         |
+|                                 | RG1: max date 2023-06-30 < 2024-01-01 → NO MATCH → SKIP                                      |
+|                                 | RG2: max date 2023-12-31 < 2024-01-01 → NO MATCH → SKIP                                      |
+|                                 | RG3: min 2024-01-01, max 2024-06-30 → WITHIN RANGE → READ                                    |
+|                                 | RG4: min 2024-07-01, max 2024-12-31 → WITHIN RANGE → READ                                    |
+|                                 | RG5: min 2025-01-01 > 2024-12-31 → NO MATCH → SKIP                                           |
+|                                 |                                                                                               |
+|                                 | Result: Only 2 of 5 row groups read → 60% I/O reduction                                      |
+|                                 | ```                                                                                           |
+|                                 |                                                                                               |
+|                                 | **Multiple levels of skipping:**                                                              |
+|                                 | 1. **File level**: Skip entire files that don't contain matching data                         |
+|                                 | 2. **Row group level**: Skip groups within files that don't match                            |
+|                                 | 3. **Column chunk level**: Skip columns not needed (column pruning)                           |
+|                                 | 4. **Page level**: Skip individual pages within column chunks                                 |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **I/O reduction**              | Predicate pushdown reduces I/O at multiple levels:                                            |
+|                                 |                                                                                               |
+|                                 | **Type of I/O**        | **Without Pushdown** | **With Pushdown** | **Reduction**          |
+|                                 | ----------------------|----------------------|--------------------|------------------------|
+|                                 | Disk reads            | Full file scan       | Selective blocks   | 70-99% less           |
+|                                 | Network transfer      | Full data movement   | Filtered data only | 70-99% less           |
+|                                 | Memory allocation     | Full dataset         | Working set only   | 70-99% less           |
+|                                 | CPU processing        | Parse all data       | Parse only matches | 70-99% less           |
+|                                 |                                                                                               |
+|                                 | **Real-world example:**                                                                        |
+|                                 | Table: 10 TB, 5 years of data (2020-2024)                                                     |
+|                                 | Query: Sales data for last month only                                                         |
+|                                 |                                                                                               |
+|                                 | Without predicate pushdown:                                                                   |
+|                                 | - Scan 10 TB from disk                                                                        |
+|                                 | - Transfer 10 TB over network                                                                 |
+|                                 | - Load into memory, then filter                                                               |
+|                                 | - Keep 0.16 TB (1 month ≈ 1/60 of 5 years)                                                    |
+|                                 | - **Waste: 9.84 TB I/O (98.4%)**                                                              |
+|                                 | - Query time: Hours                                                                           |
+|                                 |                                                                                               |
+|                                 | With predicate pushdown:                                                                      |
+|                                 | - Read metadata (KB)                                                                          |
+|                                 | - Identify files/row groups for last month                                                    |
+|                                 | - Read only 0.16 TB from disk                                                                |
+|                                 | - Transfer only 0.16 TB                                                                       |
+|                                 | - Load only relevant data                                                                     |
+|                                 | - **I/O savings: 98.4%**                                                                      |
+|                                 | - Query time: Minutes                                                                         |
+|                                 |                                                                                               |
+|                                 | **Mathematical I/O reduction:**                                                               |
+|                                 | ```                                                                                           |
+|                                 | I/O Reduction = 1 - (Matching Data / Total Data)                                              |
+|                                 |                                                                                               |
+|                                 | For time-series data with date filter on 1 month:                                             |
+|                                 | I/O Reduction = 1 - (1 month / 60 months) = 1 - 0.0166 = 98.34%                              |
+|                                 |                                                                                               |
+|                                 | For selective filter on 1% of rows:                                                           |
+|                                 | I/O Reduction = 1 - 0.01 = 99%                                                                |
+|                                 | ```                                                                                           |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **Compare to late filtering**   | **Late Filtering (Row-Based Approach):**                                                      |
+|                                 | ```                                                                                           |
+|                                 | Step 1: Read ALL data from disk ──┐                                                          |
+|                                 |            ↓                       │                                                          |
+|                                 | Step 2: Transfer ALL to memory     │ 100% of data moved                                       |
+|                                 |            ↓                       │ through entire pipeline                                 |
+|                                 | Step 3: Load into query engine     │                                                          |
+|                                 |            ↓                       │                                                          |
+|                                 | Step 4: APPLY FILTER  ←────────────┘                                                          |
+|                                 |            ↓                                                                                  |
+|                                 | Step 5: Keep matches, discard rest                                                            |
+|                                 |            ↓                                                                                  |
+|                                 | Step 6: Return results                                                                        |
+|                                 |                                                                                               |
+|                                 | **Analogy:** Like buying every book in the store, bringing them home,                        |
+|                                 | then checking which ones you actually wanted to read.                                         |
+|                                 | ```                                                                                           |
+|                                 |                                                                                               |
+|                                 | **Early Filtering (Predicate Pushdown):**                                                      |
+|                                 | ```                                                                                           |
+|                                 | Step 1: Check metadata (min/max) ──┐                                                          |
+|                                 |            ↓                        │                                                          |
+|                                 | Step 2: Identify matching blocks    │ Only matching blocks                                    |
+|                                 |            ↓                        │ proceed through pipeline                                |
+|                                 | Step 3: Read ONLY matching data  ←──┘                                                         |
+|                                 |            ↓                                                                                  |
+|                                 | Step 4: Transfer ONLY matches                                                                 |
+|                                 |            ↓                                                                                  |
+|                                 | Step 5: Load into query engine                                                                |
+|                                 |            ↓                                                                                  |
+|                                 | Step 6: Return results                                                                        |
+|                                 |                                                                                               |
+|                                 | **Analogy:** Checking book summaries online first, then only buying                         |
+|                                 | the books you actually want to read.                                                           |
+|                                 | ```                                                                                           |
+|                                 |                                                                                               |
+|                                 | **Key differences:**                                                                           |
+|                                 |                                                                                               |
+|                                 | **Aspect**            | **Late Filtering**                    | **Early Filtering**               |
+|                                 | ----------------------|---------------------------------------|-----------------------------------|
+|                                 | When filtering happens| After data loaded                    | Before data read                  |
+|                                 | Data read             | 100% of data                         | Only matching data                |
+|                                 | I/O efficiency        | Poor - reads everything              | Excellent - reads only what's needed |
+|                                 | Memory pressure       | High - loads full dataset            | Low - loads only matches          |
+|                                 | Network usage         | High - transfers all data            | Low - transfers only matches      |
+|                                 | CPU efficiency        | Poor - processes then discards       | Good - only processes matches     |
+|                                 | Scalability           | Limited - hits wall as data grows    | Excellent - scales with selectivity |
+|                                 | Cost (cloud)          | High - pay for all data scanned      | Low - pay only for data read      |
+|                                 |                                                                                               |
+
+## Step 3: Query Scenario Analysis (15 mins)
+# Given this query:
+
+## Query optimization breakdown:
+=====================================================================================================================
+| Step                    | Action                                      | Data Read                | Benefit                     |
+|-------------------------|----------------------------------------------|--------------------------|-----------------------------|
+| 1. Predicate Pushdown   | Check order_date min/max per row group      | Metadata only (KB)       | 99.7% of data skipped       |
+|                         | Skip non-matching row groups                 | (no data read yet)       | without touching disk       |
+|-------------------------|----------------------------------------------|--------------------------|-----------------------------|
+| 2. Column Pruning       | Identify needed columns:                     | No additional I/O        | 57% of columns eliminated   |
+|                         | order_date, region, amount                   | (logical pruning)        | from consideration          |
+|-------------------------|----------------------------------------------|--------------------------|-----------------------------|
+| 3. Data Reading         | Read only region and amount columns          | Only 2 columns ×         | Only 0.8% of total data     |
+|                         | from matching row groups                     | matching rows            | read (2 of 7 cols × 0.3%    |
+|                         |                                              |                          | of rows)                    |
+|-------------------------|----------------------------------------------|--------------------------|-----------------------------|
+| 4. Processing           | GROUP BY region, SUM(amount)                 | Only relevant data       | Minimal memory, fast CPU    |
+|                         | in memory                                    | in memory                | processing                  |
+|-------------------------|----------------------------------------------|--------------------------|-----------------------------|
+| **TOTAL**               | **End-to-end optimization**                  | **~0.8% of table**       | **99.2% I/O reduction**     |
+=====================================================================================================================
+
+###  Comparison to row-based:
+
+=====================================================================================================================
+| Aspect                    | Row-Based (CSV)                                   | Columnar (Parquet)                          |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **Columns read**          | All 7 columns                                     | Only 2 columns (region, amount)             |
+|                           | (must read entire rows)                           | (order_date used via metadata)              |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **Rows scanned**          | All rows (100% of table)                          | Only rows from matching row groups           |
+|                           | Must scan entire file to find matching dates      | (~0.3% of rows for single day)              |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **I/O operations**        | Sequential scan of entire file                    | Seek to specific column blocks,              |
+|                           | One continuous read                               | read only relevant chunks                    |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **Data read (1TB table)** | **1,000 GB** read                                 | **~2.4 GB** read                             |
+|                           | (100% of table)                                   | (0.24% of table)                            |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **Memory usage**          | High - loads all columns for all rows             | Low - only region and amount for             |
+|                           | (7 columns × 100% rows)                           | matching rows (2 cols × 0.3% rows)          |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **Network transfer**      | 1,000 GB moved                                    | 2.4 GB moved                                |
+| (if distributed)          |                                                   |                                             |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **CPU processing**        | Parses all 7 columns for all rows,                 | Parses only 2 columns for matching rows,     |
+|                           | then filters, then aggregates                     | then aggregates                             |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **Query speed**           | **Slow** (minutes to hours)                       | **Fast** (seconds)                          |
+|                           | I/O bound - waiting on disk                       | CPU bound - actual processing                |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **Cloud cost**            | **High** - pay for scanning 1,000 GB              | **Low** - pay for scanning 2.4 GB           |
+| (pay-per-scan)            |                                                   |                                             |
+|---------------------------|---------------------------------------------------|---------------------------------------------|
+| **I/O waste**             | **99.76% waste**                                  | **0% waste**                                 |
+|                           | (reads everything, keeps 0.24%)                   | (reads only what's needed)                  |
+=====================================================================================================================
+
+  
+### Step 4: Optimization Summary (10 mins)
+## Summarize the concepts:
+=====================================================================================================================
+| Aspect                          | Explanation                                                                       |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **How optimizations complement** | These three optimizations work at different levels of the query pipeline, creating a        |
+| **each other**                  | multiplicative effect:                                                                    |
+|                                 |                                                                                               |
+|                                 | • **Predicate Pushdown** eliminates entire row groups at the storage layer based on          |
+|                                 |   filter conditions (reduces rows scanned)                                                   |
+|                                 |                                                                                               |
+|                                 | • **Column Pruning** eliminates unnecessary columns from being read                          |
+|                                 |   (reduces columns scanned)                                                                  |
+|                                 |                                                                                               |
+|                                 | • **Parquet's columnar storage** enables both by physically separating columns and           |
+|                                 |   storing rich metadata (min/max, dictionaries)                                              |
+|                                 |                                                                                               |
+|                                 | They work sequentially: pushdown first (skip row groups), then pruning (skip columns),       |
+|                                 | resulting in minimal data movement through the pipeline.                                     |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **Combined effect**             | The optimizations multiply rather than add:                                                   |
+|                                 |                                                                                               |
+|                                 | `Total I/O Reduction = (Row groups skipped %) × (Columns pruned %)`                          |
+|                                 |                                                                                               |
+|                                 | Example: Skip 90% of row groups + prune 80% of columns = 98% I/O reduction                    |
+|                                 | (not 170% - because you can't skip more than 100% of data)                                   |
+|                                 |                                                                                               |
+|                                 | ```                                                                                           |
+|                                 | Mathematical proof:                                                                           |
+|                                 | Data read = Total Data × (1 - Row groups skipped) × (1 - Columns pruned)                    |
+|                                 |           = 100% × (10% remaining) × (20% remaining)                                         |
+|                                 |           = 100% × 0.1 × 0.2 = 2% of original data                                           |
+|                                 |                                                                                               |
+|                                 | Savings = 100% - 2% = 98%                                                                    |
+|                                 | ```                                                                                           |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| **Concrete example**            | **Table**: 100 row groups, 20 columns                                                        |
+|                                 | **Query**: `SELECT col1, col2 FROM table WHERE date = '2024-01-01'`                          |
+|                                 | (hits only 1 row group containing that date)                                                 |
+|                                 |                                                                                               |
+|                                 | **Without optimizations**:                                                                    |
+|                                 | • Read 100% of data = 100 row groups × 20 columns = 2,000 units                             |
+|                                 |                                                                                               |
+|                                 | **With pushdown only**:                                                                       |
+|                                 | • Read 1% of data = 1 row group × 20 columns = 20 units                                     |
+|                                 | • Savings: 98%                                                                                |
+|                                 |                                                                                               |
+|                                 | **With pruning only**:                                                                        |
+|                                 | • Read 100% of data = 100 row groups × 2 columns = 200 units                                |
+|                                 | • Savings: 90%                                                                                |
+|                                 |                                                                                               |
+|                                 | **With BOTH optimizations**:                                                                  |
+|                                 | • Read 0.1% of data = 1 row group × 2 columns = 2 units                                     |
+|                                 | • Savings: 99.9%                                                                              |
+|                                 | • **1,000x reduction** in data read                                                          |
+
+
+---
+
+## Why This Matters at Scale
+
+| Aspect | Explanation |
+|--------|-------------|
+| **Data volumes** | Modern datasets routinely reach billions of rows and petabytes of scale:<br>• **E-commerce**: billions of transactions<br>• **IoT**: trillions of sensor readings<br>• **Web analytics**: billions of events daily<br>• **Financial data**: decades of tick data |
+| **I/O savings calculation** | ```
+Table: 1 PB (petabyte), 100 columns
+Query: SELECT 5 columns, filter to 1% of rows
+
+Row-Based I/O: 1 PB (100% read)
+Columnar I/O: 
+  - Pushdown: 1% of rows = 10 TB
+  - Pruning: 5/100 columns = 5% of each row
+  - Combined: 10 TB × 5% = 0.5 TB
+
+I/O Reduction: (1 PB - 0.5 TB) / 1 PB = 99.95% savings!
+``` |
+| **Cost implications** | Cloud data platforms charge by data scanned:<br><br>• **AWS Athena**: $5 per TB scanned<br>• **Google BigQuery**: $5 per TB processed<br>• **Azure Synapse**: $5 per TB read<br><br>**Cost example**:<br>• Query scanning 1 PB row-based = $5,000<br>• Same query with optimizations (0.5 TB) = $2.50<br>• **Savings**: $4,997.50 per query! |
+| **Query performance** | ```
+I/O is the bottleneck in analytical queries:
+
+Without optimizations:
+  - Read 1 PB at 100 MB/s = 10 million seconds = 115 days
+  - Even with parallelization: impractical
+
+With optimizations:
+  - Read 0.5 TB at 100 MB/s = 5,000 seconds = 83 minutes
+  - With parallelization: minutes instead of days
+
+Performance improvement: 100x - 1000x faster
+``` |
+
+---
+
+## Key Takeaways
+
+| Concept | Takeaway |
+|---------|----------|
+| **Most important concept** | **"Read only what you need"** - The fundamental principle of big data analytics. Don't pay the I/O cost for data that won't contribute to the result. |
+| **What to remember** | • **Predicate pushdown** skips rows before reading<br>• **Column pruning** skips columns before reading<br>• **Parquet enables both** with columnar storage and metadata<br>• **Combined effect is multiplicative**, not additive<br>• **I/O is the bottleneck** - reducing it is the key to performance |
+| **How this affects format choice** | • **Choose columnar formats (Parquet/ORC)** for any analytical workload<br>• **Avoid row-based formats (CSV/JSON)** for large-scale analytics<br>• **Use raw formats only for ingestion**, convert to columnar for query |
+| **Practical implications** | • **Query speed**: 10-100x faster on same hardware<br>• **Cost**: 90-99% reduction in cloud data processing bills<br>• **Scale**: Petabyte-scale analytics becomes practical<br>• **User experience**: Interactive querying on massive datasets |
+
+---
+
+## Optimization Summary Table
+## Optimization Summary Table
+
+=====================================================================================================================
+| Optimization        | What It Does                                   | Benefit                     | When It Helps             |
+|---------------------|------------------------------------------------|------------------------------|---------------------------|
+| Column Pruning      | Reads only columns referenced in the query     | 50-95% less I/O              | Queries with SELECT       |
+|                     | Skips all other columns completely             | (fewer columns read)         | that don't need all       |
+|                     |                                                |                              | columns (most queries)    |
+|---------------------|------------------------------------------------|------------------------------|---------------------------|
+| Predicate Pushdown  | Uses metadata (min/max) to skip entire         | 70-99% less I/O              | Queries with WHERE        |
+|                     | row groups that don't satisfy WHERE clause     | (fewer rows read)            | filters on columns        |
+|                     |                                                |                              | with good statistics      |
+|---------------------|------------------------------------------------|------------------------------|---------------------------|
+| Combined Effect     | Pushdown eliminates row groups,                 | 90-99.9% less I/O            | Analytical queries on     |
+|                     | Pruning eliminates columns                      | (multiplicative benefit)     | large datasets with       |
+|                     |                                                |                              | selective filters         |
+|---------------------|------------------------------------------------|------------------------------|---------------------------|
+| Parquet Storage     | Enables both optimizations through:             | Foundation for all           | Any workload where        |
+|                     | - Columnar layout (for pruning)                | other optimizations          | performance matters       |
+|                     | - Embedded metadata (for pushdown)             |                              |                           |
+=====================================================================================================================
