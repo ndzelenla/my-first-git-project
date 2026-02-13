@@ -1,0 +1,938 @@
+### Step 1: Sharding Concepts Review (10 mins)
+# Answer these fundamental questions:
+## What is Horizontal vs Vertical Partitioning?
+
+=====================================================================================================================
+| Aspect                    | Horizontal Partitioning (Sharding)                   | Vertical Partitioning              |
+|---------------------------|-------------------------------------------------------|-------------------------------------|
+| **Definition**            | Splitting a table by rows across multiple             | Splitting a table by columns        |
+|                           | databases/servers. Each shard contains a subset       | across multiple tables. Each        |
+|                           | of rows with all columns.                              | partition contains a subset of      |
+|                           |                                                       | columns with all rows.              |
+|---------------------------|-------------------------------------------------------|-------------------------------------|
+| **Visual Representation** | ```                                                  | ```                                |
+|                           | Table: 1B rows                                       | Table: 50 columns                  |
+|                           |                                                       |                                    |
+|                           | Shard 1: Rows 1-333M                                 | Part 1: user_id, name, email       |
+|                           | [1, Alice, 30, NYC]                                  | [1, Alice, alice@e.com]            |
+|                           | [2, Bob, 25, LA] ...                                 | [2, Bob, bob@e.com] ...            |
+|                           |                                                       |                                    |
+|                           | Shard 2: Rows 333M-666M                              | Part 2: user_id, address, phone    |
+|                           | [333M, Charlie, 35, CHI]                             | [1, 123 Main St, 555-0100]         |
+|                           | [333M+1, Diana, 28, SF] ...                          | [2, 456 Oak Rd, 555-0200] ...      |
+|                           |                                                       |                                    |
+|                           | Shard 3: Rows 666M-1B                                 | Part 3: user_id, preferences,      |
+|                           | [666M, Eve, 32, SEA] ...                              | [1, {notify:true}, ...]            |
+|                           | ```                                                  | ```                                |
+|---------------------------|-------------------------------------------------------|-------------------------------------|
+| **When appropriate**      | • Dataset too large for single server                 | • Wide tables with columns that     |
+|                           | • Write throughput exceeds single node capacity       |   are accessed separately           |
+|                           | • Geographic distribution of users                    | • Columns with different access     |
+|                           | • Need for linear scalability                         |   patterns (frequent vs rare)       |
+|                           |                                                       | • Security separation (PII data)    |
+|                           |                                                       | • Different storage requirements    |
+|---------------------------|-------------------------------------------------------|-------------------------------------|
+| **Scalability characteristics** | • **Linear scalability** - Add more servers      | • **Limited scalability** - Still   |
+|                           |   to handle more data/throughput                      |   on same server                    |
+|                           | • **Scale-out architecture** - Horizontal growth      | • **Scale-up architecture** -       |
+|                           | • **No single node bottleneck** for writes            |   Vertical growth (bigger server)   |
+|                           | • **Complex queries** may need scatter-gather         | • **Simpler queries** - All data    |
+|                           |                                                       |   in one place                      |
+|---------------------------|-------------------------------------------------------|-------------------------------------|
+| **Example**               | User database sharded by user_id mod 10               | User table split:                   |
+|                           | • Shard 0: users with ids ending in 0                 | • users_core: id, name, email       |
+|                           | • Shard 1: users with ids ending in 1                 | • users_extended: id, address,      |
+|                           | • ... and so on                                       |   preferences, settings             |
+|---------------------------|-------------------------------------------------------|-------------------------------------|
+| **Advantages**            | ✓ Scales write capacity                               | ✓ Can optimize storage per column   |
+|                           | ✓ Distributes load                                    | ✓ Improved cache efficiency         |
+|                           | ✓ High availability possible                          | ✓ Security isolation                 |
+|                           | ✓ Geo-distribution                                    | ✓ Reduced I/O for common queries    |
+|---------------------------|-------------------------------------------------------|-------------------------------------|
+| **Disadvantages**         | ✗ Complex queries across shards                       | ✗ Still limited by single server    |
+|                           | ✗ Transactions across shards difficult                | ✗ Joins needed for full rows        |
+|                           | ✗ Rebalancing complexity                              | ✗ No write scalability              |
+|                           | ✗ Application awareness required                      | ✗ Doesn't solve big data volume     |
+=====================================================================================================================
+
+### What is the Difference Between Sharding and Indexing?
+=====================================================================================================================
+| Aspect                    | Sharding                                           | Indexing                              |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **Definition**            | Physically splitting data across multiple          | Creating a separate data structure    |
+|                           | database instances/servers                         | to speed up data retrieval            |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **Purpose**               | Scale horizontally by distributing data            | Speed up queries by providing         |
+|                           | and workload across multiple nodes                 | fast lookup paths                     |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **How it works**          | Data partitioned by a shard key; each shard        | Creates sorted copy of selected       |
+|                           | stored on different server                          | columns with pointers to rows         |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **Granularity**           | Coarse-grained - splits entire dataset             | Fine-grained - speeds up access       |
+|                           | into chunks                                        | within a dataset                      |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **When indexing is sufficient** | • Data fits on single server                               |
+|                              | • Read performance is the bottleneck                          |
+|                              | • Write volume is manageable                                   |
+|                              | • Queries are predictable                                      |
+|                              | • Need fast lookup on specific columns                        |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **When sharding is necessary** | • Data exceeds single server capacity                        |
+|                              | • Write throughput exceeds single node capacity                |
+|                              | • Need geographic distribution                                 |
+|                              | • Require linear scalability                                   |
+|                              | • High availability requirements                               |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **Can you use both together?** | ✅ **YES - They complement each other**                    |
+|                              |                                                                   |
+|                              | **Example:**                                                     |
+|                              | 1. **Shard** by user_id across 10 database servers              |
+|                              | 2. **Index** on email column within each shard                   |
+|                              |                                                                   |
+|                              | Query: `SELECT * FROM users WHERE email = 'user@example.com'`    |
+|                              | • Sharding routes query to correct shard based on user_id?       |
+|                              |   → No, email lookup needs scatter-gather                        |
+|                              | • Index on email makes each shard lookup fast                    |
+|                              | • Combined: Fast parallel searches across 10 shards              |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **Key differences table** |                                                                   |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **Scope**                 | Across servers (horizontal scaling)                | Within a single database/server       |
+| **Data placement**        | Determines where data lives                        | Determines how data is organized      |
+| **Query impact**          | Affects which server handles the query             | Affects speed within server           |
+| **Transparency**          | Often application-aware                            | Transparent to application            |
+| **Complexity**            | High - infrastructure, routing, consistency       | Low - built-in database feature       |
+| **Scalability**           | Enables scaling beyond single server               | Improves performance within limits    |
+| **Analogy**               | Moving to a bigger house vs organizing             | Moving to multiple houses vs          |
+|                           | your current house                                  | organizing each room                  |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **Real-world example**    | **Sharding**: Facebook shards user data            | **Indexing**: Amazon product search   |
+|                           | by user ID across thousands of servers             | uses indexes on categories, price     |
+|---------------------------|----------------------------------------------------|---------------------------------------|
+| **Combined approach**     | ```                                               |                                      |
+|                           | Application → Shard Router → Shard 1 (with indexes)              |
+|                           |                         → Shard 2 (with indexes)                  |
+|                           |                         → Shard 3 (with indexes)                  |
+|                           |                                                                   |
+|                           | Each shard has its own indexes for fast local queries             |
+|                           | ```                                                              |
+=====================================================================================================================
+
+### What are the Key Considerations for Sharding?
+=====================================================================================================================
+| Consideration            | Explanation                                                                  | Impact                   |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| **Data Distribution**    | **How to split data across shards?**                                         | Critical for balance     |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Shard Key Selection      | Choose column(s) that distribute data evenly                                 | • Even distribution = balanced load  |
+|                          | Examples: user_id, customer_id, order_id                                     | • Skewed distribution = hot spots    |
+|                          | Avoid: created_date (all new data to one shard)                              | • Affects query routing              |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Distribution Strategies  | • **Range-based**: shard by ranges (user_id 1-1000, 1001-2000)               | • Simple, but can cause hot spots    |
+|                          | • **Hash-based**: hash(shard_key) % num_shards                               | • Even distribution, but rebalancing |
+|                          | • **Directory-based**: lookup table maps key to shard                        | • Flexible, but extra hop            |
+|                          | • **Geo-based**: shard by region                                             | • Good for data locality              |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| **Query Routing**        | **How do queries find the right shard?**                                     | Affects query latency    |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Shard-aware routing      | Queries include shard key → route directly to correct shard                 | • Fastest path (single shard)        |
+|                          | Example: `SELECT * FROM users WHERE user_id = 123`                          | • O(1) lookup time                   |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Scatter-gather           | Queries without shard key → broadcast to all shards, combine results        | • Slower, more complex                |
+|                          | Example: `SELECT * FROM users WHERE email = 'x@y.com'`                      | • Need to query all shards            |
+|                          |                                                                              | • Results must be merged              |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Routing layer            | Proxy or middleware that routes queries                                     | • Adds complexity but simplifies app |
+|                          | Examples: ProxySQL, Vitess, ShardingSphere                                   | • Can handle cross-shard ops         |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| **Scalability**          | **How well does the system grow?**                                          | Long-term viability      |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Read scalability         | Add read replicas per shard                                                  | ✓ Good - scale horizontally          |
+| Write scalability        | Add more shards                                                             | ✓ Excellent - linear scaling         |
+| Rebalancing              | Adding/removing shards requires data movement                               | ✗ Complex, can cause downtime        |
+|                          | Need consistent hashing or re-sharding strategy                              |                                      |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| **Complexity**           | **What operational challenges arise?**                                      | Team/operational impact  |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Application complexity   | Code must be shard-aware                                                     | • Higher development cost             |
+|                          | Connection management, query routing                                         | • Testing more complex                |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Operational complexity   | More servers to manage                                                       | • Higher ops overhead                 |
+|                          | Backup/restore across shards                                                 | • Monitoring complexity               |
+|                          | Schema changes across all shards                                             | • Deployment coordination             |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Cross-shard operations   | Joins across shards difficult                                               | • Often need denormalization          |
+|                          | Transactions across shards complex (2PC)                                     | • Compromise on ACID                  |
+|                          | Aggregations require scatter-gather                                          | • Use distributed query engines       |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| **Consistency**          | **How to maintain data correctness across shards?**                         | Data integrity           |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Transactional integrity  | ACID across shards is hard                                                   | • Avoid cross-shard transactions      |
+|                          | Two-phase commit (2PC) is slow                                               | • Design for single-shard operations  |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Consistency models       | • Strong consistency - difficult across shards                               | • Choose based on requirements        |
+|                          | • Eventual consistency - easier                                              | • CAP theorem trade-offs              |
+|                          | • Client-consistency - per session                                           |                                      |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Data distribution        | Related data should be on same shard                                         | • Reduces cross-shard joins            |
+| considerations           | Example: user data + user orders on same shard                               | • Enables local transactions           |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| **Other Considerations** |                                                                              |                          |
+|--------------------------|------------------------------------------------------------------------------|--------------------------|
+| Cost                     | More servers = higher cost                                                   | Balance performance vs budget         |
+| Geo-distribution         | Shard by region to reduce latency                                            | Improves user experience               |
+| Compliance               | Keep data in specific geographic boundaries                                  | Regulatory requirements               |
+| Disaster recovery        | Backup/restore per shard                                                      | Plan for multi-shard recovery         |
+=====================================================================================================================
+
+### Step 2: Shard Key Selection (20 mins)
+## For each dataset, propose and justify a shard key:
+
+## Dataset 1: User Accounts
+users (
+  user_id INT PRIMARY KEY,
+  email VARCHAR(100),
+  username VARCHAR(50),
+  country VARCHAR(50),
+  created_at TIMESTAMP
+)
+
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Proposed Shard Key**       | **`user_id`**                                                                                 |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Sharding Strategy**        | **Hash-based** (e.g., `hash(user_id) % num_shards`)                                          |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            |                                                                                               |
+| High Cardinality             | ✓ `user_id` is a primary key with unique values for every user. Perfect cardinality -        |
+|                              |   as many distinct values as there are users. No risk of collision or skew.                  |
+| Even Distribution            | ✓ Hash of `user_id` distributes rows uniformly across shards. Each shard gets roughly        |
+|                              |   equal number of users regardless of user_id patterns.                                       |
+| Query Alignment              | ✓ Most user queries include `user_id` (login, profile view, update). These route directly    |
+|                              |   to a single shard - optimal performance.                                                   |
+|                              | ✓ Queries by `email` or `username` (login) would require scatter-gather, but these can       |
+|                              |   be supported with global secondary indexes.                                                |
+| Write Distribution           | ✓ New user registrations distributed evenly across all shards. No "hot shard" for writes.    |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Queries without user_id need scatter-gather | • Single-shard efficiency for user_id queries|
+|                              | • Need secondary index for email/username      | • Simplicity of unsharded approach           |
+|                              | • Rebalancing requires rehashing              |                                              |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Reasoning**                | `user_id` is the natural choice because:                                                     |
+|                              | 1. It's the primary key - already used for uniqueness                                        |
+|                              | 2. It appears in most queries - login, profile, updates                                      |
+|                              | 3. Hash distribution ensures perfect balance                                                  |
+|                              | 4. High cardinality guarantees no single value dominates                                     |
+|                              |                                                                                               |
+|                              | **Alternative considered**: `country` - Rejected because:                                     |
+|                              | - Low cardinality (only ~200 countries) → uneven distribution                                 |
+|                              | - Some countries (US, China) would be huge hot spots                                          |
+|                              | - Writes concentrated in popular countries                                                    |
+|                              |                                                                                               |
+|                              | **Alternative considered**: `created_at` - Rejected because:                                  |
+|                              | - Range-based would create hot shard for current date                                        |
+|                              | - All new writes go to one shard → write bottleneck                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Example**                  | ```                                                                                           |
+|                              | num_shards = 10                                                                               |
+|                              | shard = hash(user_id) % 10                                                                    |
+|                              |                                                                                               |
+|                              | user_id = 12345 → hash(12345) % 10 = 5 → goes to shard 5                                     |
+|                              | user_id = 67890 → hash(67890) % 10 = 2 → goes to shard 2                                     |
+|                              |                                                                                               |
+|                              | Query: SELECT * FROM users WHERE user_id = 12345                                              |
+|                              | → Route directly to shard 5 - single shard lookup                                            |
+|                              | ```                                                                                           |
+=====================================================================================================================
+
+## Dataset 2: Transaction Records
+transactions (
+  transaction_id BIGINT PRIMARY KEY,
+  user_id INT,
+  amount DECIMAL(10,2),
+  transaction_date TIMESTAMP,
+  merchant_id INT
+)
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Proposed Shard Key**       | **`user_id`**                                                                                 |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Sharding Strategy**        | **Hash-based** (e.g., `hash(user_id) % num_shards`)                                          |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            |                                                                                               |
+| High Cardinality             | ✓ `user_id` has high cardinality - one value per user, millions of possible values.           |
+|                              |   Even large e-commerce platforms have millions of users.                                     |
+| Even Distribution            | ✓ Hash of `user_id` ensures uniform distribution. Each user's transactions stay together      |
+|                              |   but different users are spread evenly across shards.                                        |
+| Query Alignment              | ✓ Most transaction queries are by user:                                                       |
+|                              |   - "Show my transaction history" → `WHERE user_id = ?` → single shard                        |
+|                              |   - "Recent orders for this customer" → single shard                                          |
+|                              |   - "Total spent by user" → single shard aggregation                                          |
+|                              | ✓ Keeps all of a user's transactions together - enables local joins and transactions          |
+| Write Distribution           | ✓ New transactions distributed across shards based on `user_id`. No single hot shard.         |
+|                              | ✓ Even if one user is very active, their writes stay in one shard (acceptable)                |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Queries by merchant_id scatter-gather       | • Optimal user-based query performance       |
+|                              | • Date-range queries across users scatter     | • User transaction locality                  |
+|                              | • Active user creates hot spot in one shard   |                                              |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Reasoning**                | `user_id` is optimal because:                                                                 |
+|                              | 1. **Query pattern alignment** - Users check their own transactions most often                |
+|                              | 2. **Data locality** - All user's transactions in one shard enables:                          |
+|                              |    - User-level transactions (ACID)                                                          |
+|                              |    - Aggregations per user (balance, total spent)                                             |
+|                              |    - No cross-shard joins for user data                                                       |
+|                              | 3. **Even distribution** - Hash of user_id spreads load                                       |
+|                              |                                                                                               |
+|                              | **Alternative considered**: `transaction_date` - Rejected because:                            |
+|                              | - All new transactions go to current date shard → write hotspot                               |
+|                              | - Historical shards become cold → uneven load                                                 |
+|                              | - User queries span multiple date shards → scatter-gather                                     |
+|                              |                                                                                               |
+|                              | **Alternative considered**: `merchant_id` - Rejected because:                                 |
+|                              | - Merchants have highly uneven transaction volumes                                            |
+|                              | - Large merchants (Amazon, Walmart) would be massive hot spots                                |
+|                              | - User queries would scatter across many merchant shards                                      |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Example**                  | ```                                                                                           |
+|                              | num_shards = 20                                                                               |
+|                              | shard = hash(user_id) % 20                                                                    |
+|                              |                                                                                               |
+|                              | User 12345's transactions → always shard 5                                                    |
+|                              | User 67890's transactions → always shard 12                                                   |
+|                              |                                                                                               |
+|                              | Query: Get all transactions for user 12345 in last 30 days                                    |
+|                              | → Single shard query (shard 5) - fast!                                                        |
+|                              |                                                                                               |
+|                              | Query: Get all transactions for merchant ABC across all users                                 |
+|                              | → Scatter-gather to all 20 shards - slower but rare                                          |
+|                              | ```                                                                                           |
+=====================================================================================================================
+
+#### Dataset 3: IoT Sensor Data
+sensor_readings (
+  reading_id BIGINT PRIMARY KEY,
+  device_id INT,
+  sensor_type VARCHAR(50),
+  value DECIMAL(10,4),
+  timestamp TIMESTAMP,
+  location VARCHAR(100)
+)
+
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Proposed Shard Key**       | **Composite Key: `device_id` + `timestamp` (or `device_id` hash + time-based partitioning)** |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Sharding Strategy**        | **Composite: Hash-based on `device_id` + Range-based on `timestamp`**                        |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            |                                                                                               |
+| High Cardinality             | ✓ `device_id` has high cardinality - IoT deployments have thousands to millions of devices.   |
+|                              | ✓ Combined with timestamp gives unlimited cardinality.                                        |
+| Even Distribution            | ✓ Hash of `device_id` distributes devices evenly across shards                                |
+|                              | ✓ Within each device shard, time-range partitioning prevents any single shard from growing    |
+|                              |   too large and enables time-based pruning                                                   |
+| Query Alignment              | ✓ Most IoT queries are time-range + device specific:                                          |
+|                              |   - "Show readings for device X last hour" → single shard + time range                        |
+|                              |   - "Average temperature across all devices last 5 minutes" → scatter-gather but parallel     |
+|                              |   - "Readings from location Y between dates" → location index needed                          |
+|                              | ✓ Time-range component enables efficient pruning of old data                                  |
+| Write Distribution           | ✓ Writes distributed by `device_id` hash - no single device overwhelms a shard               |
+|                              | ✓ Within each shard, time-ordered writes are efficient (append-mostly)                        |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Complex sharding logic (composite)          | • Simple single-key lookups                  |
+|                              | • Need to manage time partitions              | • Cross-device queries slower                |
+|                              | • Location queries need secondary index       |                                              |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Reasoning**                | IoT data has unique characteristics:                                                          |
+|                              | 1. **Time-series nature** - Most queries are time-range based                                 |
+|                              | 2. **Device-centric** - Queries often start with device_id                                     |
+|                              | 3. **Massive volume** - Need both distribution and pruning                                    |
+|                              |                                                                                               |
+|                              | **Composite approach**:                                                                       |
+|                              | - **Level 1 (Shard)**: `hash(device_id) % num_shards` - distributes devices                  |
+|                              | - **Level 2 (Partition)**: Within each shard, partition by time (day/month)                   |
+|                              |                                                                                               |
+|                              | This gives:                                                                                   |
+|                              | ✓ Even distribution of devices                                                                |
+|                              | ✓ Efficient time-range queries (partition pruning)                                            |
+|                              | ✓ Easy data lifecycle management (drop old partitions)                                        |
+|                              | ✓ Scalable write throughput                                                                   |
+|                              |                                                                                               |
+|                              | **Alternative considered**: `timestamp` only - Rejected because:                              |
+|                              | - All writes go to current time shard → write bottleneck                                       |
+|                              | - Device queries span many time shards → scatter-gather                                       |
+|                              |                                                                                               |
+|                              | **Alternative considered**: `location` only - Rejected because:                               |
+|                              | - Locations have uneven device density                                                        |
+|                              | - Not all queries are location-based                                                          |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Implementation Example**   | ```                                                                                           |
+|                              | -- Sharding logic                                                                            |
+|                              | shard_id = hash(device_id) % 10  # 10 shards                                                  |
+|                              |                                                                                               |
+|                              | -- Within each shard, table partitioned by date                                              |
+|                              | CREATE TABLE sensor_readings_shard_5 (                                                        |
+|                              |   ...                                                                                         |
+|                              | ) PARTITION BY RANGE (timestamp) (                                                            |
+|                              |   PARTITION p202401 VALUES LESS THAN ('2024-02-01'),                                          |
+|                              |   PARTITION p202402 VALUES LESS THAN ('2024-03-01'),                                          |
+|                              |   ...                                                                                         |
+|                              | );                                                                                            |
+|                              |                                                                                               |
+|                              | Query: readings for device 123, last hour                                                     |
+|                              | → Route to shard 5, scan only latest partition (p2024)                                        |
+|                              | ```                                                                                           |
+=====================================================================================================================
+
+#### Dataset 4: Orders by Region
+
+orders (
+  order_id BIGINT PRIMARY KEY,
+  customer_id INT,
+  region VARCHAR(50),
+  order_date DATE,
+  amount DECIMAL(10,2),
+  status VARCHAR(20)
+)
+
+=====================================================================================================================
+| Aspect                       | Analysis                                                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Proposed Shard Key**       | **`region` + `customer_id` (Composite: Range on region + Hash on customer_id)**              |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Sharding Strategy**        | **Range-based on `region` first, then Hash-based on `customer_id` within region**            |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Justification**            |                                                                                               |
+| High Cardinality             | ✓ `region` has limited cardinality (NA, EU, Asia, etc.) - not high by itself                  |
+|                              | ✓ `customer_id` provides high cardinality within each region                                  |
+|                              | ✓ Composite gives both regional grouping and customer distribution                            |
+| Even Distribution            | ✓ Regional distribution matches business patterns - each region gets its own shard(s)         |
+|                              | ✓ Within region, hash of `customer_id` distributes customers evenly                           |
+|                              | ✓ Can allocate multiple shards per high-volume region                                         |
+| Query Alignment              | ✓ Most queries are regional:                                                                  |
+|                              |   - "Sales report for North America" → single region shard                                   |
+|                              |   - "Orders by customer in EU" → single region shard                                          |
+|                              |   - "Global sales summary" → query all regions in parallel                                    |
+|                              | ✓ Keeps all orders for a region together - enables regional analytics                        |
+| Write Distribution           | ✓ Writes distributed by region first - matches business geography                             |
+|                              | ✓ Within region, distributed by customer - no single customer overwhelms                      |
+|                              | ✓ Can scale regions independently based on volume                                             |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Trade-offs**               | **Accepting**                                 | **Sacrificing**                             |
+|                              |-----------------------------------------------|----------------------------------------------|
+|                              | • Global queries need scatter-gather          | • Regional query performance                 |
+|                              | • Uneven region sizes need capacity planning  | • Data locality by region                    |
+|                              | • Cross-region customer queries difficult     |                                              |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Reasoning**                | Regional orders have natural geographic boundaries:                                          |
+|                              |                                                                                               |
+|                              | **Why region-based sharding?**                                                                |
+|                              | 1. **Business alignment** - Reporting is often regional                                       |
+|                              | 2. **Data sovereignty** - Keep EU data in EU, US data in US (GDPR compliance)                |
+|                              | 3. **Latency** - Serve queries from regional data centers                                     |
+|                              | 4. **Query pattern** - Most queries include region filter                                     |
+|                              |                                                                                               |
+|                              | **Why composite with customer_id?**                                                            |
+|                              | 1. Distributes load within region                                                              |
+|                              | 2. Keeps all customer's orders in same region shard                                           |
+|                              | 3. Enables customer-level queries within region                                               |
+|                              |                                                                                               |
+|                              | **Implementation approaches**:                                                                |
+|                              | - **Small regions**: One shard per region                                                     |
+|                              | - **Large regions (NA)**: Multiple shards, split by customer_id hash                          |
+|                              |                                                                                               |
+|                              | **Alternative considered**: `customer_id` only - Rejected because:                            |
+|                              | - Loses regional data locality                                                                |
+|                              | - Cross-region queries on customer data (rare) not worth the cost                             |
+|                              | - Compliance issues (GDPR) harder                                                             |
+|                              |                                                                                               |
+|                              | **Alternative considered**: `order_date` - Rejected because:                                  |
+|                              | - All new orders go to current date shard → write hotspot                                     |
+|                              | - Regional queries would scatter across date shards                                           |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| **Example**                  | ```                                                                                           |
+|                              | Shard mapping:                                                                                |
+|                              | - Region 'NA': 3 shards (NA_1, NA_2, NA_3) - hash(customer_id) % 3                            |
+|                              | - Region 'EU': 2 shards (EU_1, EU_2) - hash(customer_id) % 2                                  |
+|                              | - Region 'Asia': 1 shard (ASIA_1)                                                             |
+|                              | - Region 'LATAM': 1 shard (LATAM_1)                                                           |
+|                              |                                                                                               |
+|                              | Order for customer 12345 in region 'NA'                                                       |
+|                              | → shard = NA_{ hash(12345) % 3 } = NA_2                                                       |
+|                              |                                                                                               |
+|                              | Query: Monthly sales report for EU region                                                     |
+|                              | → Query both EU_1 and EU_2 in parallel, combine results                                       |
+|                              |                                                                                               |
+|                              | Query: Order history for customer 12345                                                       |
+|                              | → If region known (from customer profile), direct to specific shard                           |
+|                              | → If region unknown, query all regions (rare)                                                 |
+|                              | ```                                                                                           |
+=====================================================================================================================
+
+########## STEP 3###########################
+--Dataset 1: User Accounts
+-- Shard Key: user_id (Hash-based)
+=====================================================================================================================
+| Risk Category            | Analysis                                                                 | Severity      |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Hot Partitions/Shards** | **Low Risk**                                                              | █░░░░ Low     |
+|                          | • Hash-based distribution on `user_id` ensures even distribution                                         |
+|                          | • Each user has roughly equal activity (login frequency, profile updates)                                |
+|                          | • No natural clustering that would create hot spots                                                      |
+|                          |                                                                                                           |
+|                          | **Potential edge cases:**                                                                                 |
+|                          | • Celebrity users with millions of followers might generate more traffic                                 |
+|                          | • Bot accounts could create disproportionate load                                                        |
+|                          | • Regional timezone effects (all users active at once)                                                   |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Rebalancing Risk**      | **Medium-High Risk**                                                      | ██████░░░░ Medium-High |
+|                          | **What happens when adding shards?**                                                                      |
+|                          | • Adding/removing shards requires rehashing `hash(user_id) % new_shards`                                 |
+|                          | • Most users will be remapped to different shards                                                        |
+|                          | • Requires massive data movement (up to 90% of data may need to move)                                    |
+|                          |                                                                                                           |
+|                          | **Downtime impact:**                                                                                       |
+|                          | • Significant - data must be copied, verified, switched                                                   |
+|                          | • Can take days/weeks for large user bases                                                               |
+|                          | • Often requires maintenance window or read-only mode                                                     |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                 |
+|                          | • Use consistent hashing to minimize data movement                                                        |
+|                          | • Plan for growth - start with more shards than needed                                                    |
+|                          | • Implement rolling migration with dual-writing                                                           |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Query Routing Risk**    | **Medium Risk**                                                            | ████░░░░░░ Medium |
+|                          | **Queries requiring cross-shard operations:**                                                             |
+|                          | • Login by email: `SELECT * FROM users WHERE email = ?`                                                  |
+|                          | • Username lookup: `SELECT * FROM users WHERE username = ?`                                              |
+|                          | • Search by country: `SELECT * FROM users WHERE country = 'US'`                                          |
+|                          | • Date-range queries: `SELECT * FROM users WHERE created_at > '2024-01-01'`                              |
+|                          |                                                                                                           |
+|                          | **Complexity impact:**                                                                                     |
+|                          | • Need global secondary index or lookup table for email/username                                          |
+|                          | • Country and date queries require scatter-gather (query all shards)                                      |
+|                          | • Application must know when to route directly vs scatter-gather                                          |
+|                          |                                                                                                           |
+|                          | **Performance impact:**                                                                                     |
+|                          | • Login flow (critical path) may be slower if email lookup scatters                                        |
+|                          | • Admin searches become expensive (full scan across all shards)                                           |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Data Skew Risk**        | **Low Risk**                                                               | █░░░░░░░░░ Low |
+|                          | **Potential causes of skew:**                                                                              |
+|                          | • Not all users are equal - some have more data (profile info, settings)                                 |
+|                          | • Inactive vs active users - storage difference minimal                                                   |
+|                          | • Hash distribution mathematically even, so row count per shard equal                                     |
+|                          |                                                                                                           |
+|                          | **Monitoring approach:**                                                                                    |
+|                          | • Track rows per shard, QPS per shard, storage per shard                                                  |
+|                          | • Alert on >20% deviation from average                                                                     |
+|                          | • Monitor response time per shard to detect hot spots                                                     |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Overall Risk Profile**  | **Low-Medium** - Good shard key choice with manageable risks                                              |
+=====================================================================================================================
+
+### Dataset 2: Transaction Records
+-- Shard Key: user_id (Hash-based)
+=====================================================================================================================
+| Risk Category            | Analysis                                                                 | Severity      |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Hot Partitions/Shards** | **Medium Risk**                                                            | ████░░░░░░ Medium |
+|                          | **What could cause hot shards?**                                                                           |
+|                          | • **Power users** - Some users have 1000x more transactions than average                                   |
+|                          |   Example: Amazon's top 1% of customers generate 30% of orders                                            |
+|                          | • **Viral events** - A popular product launch causes spike in transactions                                |
+|                          | • **Seasonal spikes** - All users active simultaneously (Black Friday)                                    |
+|                          |                                                                                                           |
+|                          | **Impact:**                                                                                                |
+|                          | • Shard containing power users gets 10-100x more writes                                                   |
+|                          | • Query latency increases for that shard                                                                   |
+|                          | • Can cause cascade failures if shard overloaded                                                          |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Identify and monitor power users - consider splitting their data                                        |
+|                          | • Implement request throttling per user                                                                    |
+|                          | • Cache heavily for read-heavy users                                                                      |
+|                          | • Consider sub-sharding for extreme cases                                                                 |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Rebalancing Risk**      | **Medium-High Risk**                                                      | ██████░░░░ Medium-High |
+|                          | **Challenges specific to transactions:**                                                                   |
+|                          | • Transaction data is append-only but massive volume                                                       |
+|                          | • Historical data cannot be easily moved (compliance, audit trails)                                       |
+|                          | • Rebalancing requires moving billions of rows                                                            |
+|                          |                                                                                                           |
+|                          | **Downtime impact:**                                                                                        |
+|                          | • High - transaction processing may need to pause                                                          |
+|                          | • Risk of data inconsistency during move                                                                   |
+|                          | • Verification of moved data is time-consuming                                                            |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Use consistent hashing to minimize moves                                                                 |
+|                          | • Implement rolling rebalance with dual writes                                                             |
+|                          | • Consider time-based partitioning within shards for easier archival                                       |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Query Routing Risk**    | **High Risk**                                                              | ████████░░ High |
+|                          | **Common queries requiring cross-shard ops:**                                                              |
+|                          | • Merchant analytics: `SELECT SUM(amount) FROM transactions WHERE merchant_id = ?`                       |
+|                          | • Date-range reports: `SELECT COUNT(*) FROM transactions WHERE transaction_date BETWEEN ? AND ?`         |
+|                          | • Cross-user fraud detection: `SELECT * FROM transactions WHERE amount > 10000`                           |
+|                          | • Regional reports (if region not in table)                                                                |
+|                          |                                                                                                           |
+|                          | **Complexity impact:**                                                                                      |
+|                          | • Business intelligence queries become extremely complex                                                   |
+|                          | • Need distributed query engine (Spark, Presto) for cross-shard analytics                                  |
+|                          | • Real-time merchant dashboards difficult to maintain                                                      |
+|                          |                                                                                                           |
+|                          | **Performance impact:**                                                                                     |
+|                          | • Cross-shard queries are 10-100x slower than single-shard                                                |
+|                          | • Time-range queries require scanning all shards                                                           |
+|                          | • May need to pre-aggregate data for common queries                                                        |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Data Skew Risk**        | **Medium-High Risk**                                                       | ██████░░░░ Medium-High |
+|                          | **Causes of skew:**                                                                                         |
+|                          | • **User activity distribution** - Pareto principle (80% transactions from 20% users)                      |
+|                          | • **Merchant concentration** - Large merchants generate disproportionate volume                            |
+|                          | • **Time-based concentration** - Holiday shopping spikes                                                  |
+|                          |                                                                                                           |
+|                          | **Monitoring metrics:**                                                                                     |
+|                          | • Transaction count per user (identify power users)                                                        |
+|                          | • Storage per shard (should be monitored)                                                                  |
+|                          | • Write QPS per shard (should be even)                                                                     |
+|                          | • Query latency per shard (hot shards get slower)                                                          |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Implement sub-sharding for power users (e.g., user_1234_shard_1, user_1234_shard_2)                     |
+|                          | • Consider splitting user data by time (current year vs historical)                                        |
+|                          | • Pre-aggregate at user level to reduce scan volume                                                        |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Overall Risk Profile**  | **Medium-High** - Power users and analytics queries create significant challenges                          |
+=====================================================================================================================
+
+
+### Dataset 3: IoT Sensor Data
+-- Shard Key: Composite: device_id (Hash) + timestamp (Range)
+=====================================================================================================================
+| Risk Category            | Analysis                                                                 | Severity      |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Hot Partitions/Shards** | **High Risk**                                                              | ████████░░ High |
+|                          | **What causes hot shards in IoT?**                                                                         |
+|                          | • **Device popularity** - Some devices report 1000x more frequently                                      |
+|                          |   Example: Critical infrastructure sensors vs routine monitoring                                          |
+|                          | • **Device density** - Thousands of devices in same location (factory)                                    |
+|                          | • **Event-driven spikes** - All devices report simultaneously during alerts                               |
+|                          | • **Time synchronization** - Devices report on the hour, causing write spikes                             |
+|                          |                                                                                                           |
+|                          | **Impact:**                                                                                                |
+|                          | • Shard with high-frequency devices becomes overloaded                                                     |
+|                          | • Write latency increases, causing backpressure                                                           |
+|                          | • Data loss possible if writes can't keep up                                                              |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Monitor device frequency and rebalance high-volume devices                                              |
+|                          | • Implement write buffers and batch writes                                                                 |
+|                          | • Consider sub-sharding by time for high-volume devices                                                    |
+|                          | • Use adaptive sharding - move hot devices to dedicated shards                                            |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Rebalancing Risk**      | **Very High Risk**                                                         | ██████████ Very High |
+|                          | **Unique challenges for IoT:**                                                                             |
+|                          | • **Massive data volume** - Petabytes of historical data                                                   |
+|                          | • **Time-based partitioning** complicates rebalancing                                                      |
+|                          | • **Continuous ingestion** - Cannot pause writes for rebalance                                            |
+|                          | • **Data retention policies** - Old data may be archived differently                                       |
+|                          |                                                                                                           |
+|                          | **Downtime impact:**                                                                                        |
+|                          | • Extremely high - rebalancing petabytes takes weeks/months                                                |
+|                          | • Risk of data loss during massive data movement                                                           |
+|                          | • Complex verification of moved data                                                                       |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Design for growth - over-provision shards initially                                                      |
+|                          | • Use consistent hashing on device_id                                                                      |
+|                          | • Implement time-based rotation (new data goes to new shards, old data stays)                              |
+|                          | • Consider separate clusters for hot (recent) vs cold (historical) data                                    |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Query Routing Risk**    | **Medium Risk**                                                            | ████░░░░░░ Medium |
+|                          | **Common query patterns:**                                                                                  |
+|                          | • Device-specific time range: `SELECT * FROM sensor_readings WHERE device_id = ? AND timestamp > ?`       |
+|                          |   → Routes to single shard (hash device_id), then partition pruning on timestamp                          |
+|                          |                                                                                                           |
+|                          | • Cross-device analytics: `SELECT AVG(value) FROM sensor_readings WHERE sensor_type = 'temperature'`      |
+|                          |   → Scatter-gather to all shards - expensive                                                              |
+|                          |                                                                                                           |
+|                          | • Location-based: `SELECT * FROM sensor_readings WHERE location = 'Building A'`                           |
+|                          |   → Needs secondary index or scatter-gather                                                               |
+|                          |                                                                                                           |
+|                          | **Complexity impact:**                                                                                       |
+|                          | • Real-time dashboards for specific devices are fast                                                       |
+|                          | • Global analytics require distributed query engine                                                        |
+|                          | • Location queries need additional indexing                                                                |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Data Skew Risk**        | **High Risk**                                                              | ████████░░ High |
+|                          | **Causes of skew:**                                                                                         |
+|                          | • **Device heterogeneity** - 1% of devices generate 50% of data                                            |
+|                          | • **Event bursts** - All devices report during incidents                                                   |
+|                          | • **Geographic concentration** - Dense sensor deployments                                                  |
+|                          | • **Time patterns** - Business hours vs nights                                                             |
+|                          |                                                                                                           |
+|                          | **Monitoring approach:**                                                                                     |
+|                          | • Track data volume per device (identify top talkers)                                                      |
+|                          | • Monitor ingestion rate per shard in real-time                                                             |
+|                          | • Alert on significant deviation from mean                                                                 |
+|                          | • Track query latency per shard                                                                            |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Implement dynamic shard splitting for hot devices                                                        |
+|                          | • Use tiered storage - hot devices to faster storage                                                       |
+|                          | • Pre-aggregate high-frequency data on ingestion                                                           |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Overall Risk Profile**  | **High** - Device heterogeneity and massive volume create significant challenges                           |
+=====================================================================================================================
+
+### Dataset 4: Orders by Region
+-- Shard Key: Composite: region (Range) + customer_id (Hash)
+=====================================================================================================================
+| Risk Category            | Analysis                                                                 | Severity      |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Hot Partitions/Shards** | **High Risk**                                                              | ████████░░ High |
+|                          | **What causes hot shards in regional sharding?**                                                          |
+|                          | • **Uneven regional volume** - North America may have 10x more orders than LATAM                          |
+|                          | • **Megacities within regions** - New York alone might rival small countries                               |
+|                          | • **Seasonal peaks** - Christmas in NA, Lunar New Year in Asia                                            |
+|                          | • **Marketing campaigns** - Regional promotions cause spikes                                              |
+|                          |                                                                                                           |
+|                          | **Impact:**                                                                                                |
+|                          | • NA shards become overloaded while LATAM shards sit idle                                                  |
+|                          | • Uneven resource utilization - wasted capacity in some regions                                            |
+|                          | • Performance degradation for high-volume regions                                                          |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Allocate multiple shards per high-volume region                                                          |
+|                          |   - NA: 10 shards, EU: 5 shards, Asia: 3 shards, LATAM: 1 shard                                           |
+|                          | • Monitor regional growth and adjust shard count                                                           |
+|                          | • Implement regional load balancing - distribute customers within region                                   |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Rebalancing Risk**      | **Very High Risk**                                                         | ██████████ Very High |
+|                          | **Unique challenges for regional sharding:**                                                               |
+|                          | • **Adding a new region** is easy - just add new shard                                                    |
+|                          | • **But rebalancing within a region** is hard!                                                             |
+|                          |                                                                                                           |
+|                          | **Example problem:**                                                                                        |
+|                          | • NA region grows from 10M to 100M orders                                                                  |
+|                          | • Need to split NA from 3 shards to 10 shards                                                              |
+|                          | • Requires moving data within the region across new shards                                                 |
+|                          | • Cannot easily move data across regional boundaries due to compliance                                     |
+|                          |                                                                                                           |
+|                          | **Downtime impact:**                                                                                        |
+|                          | • High - regional splits require data migration                                                            |
+|                          | • May need regional downtime during rebalance                                                              |
+|                          | • Complex routing logic updates                                                                             |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Over-provision shards per region from start                                                              |
+|                          | • Use consistent hashing within region to minimize moves                                                   |
+|                          | • Implement rolling regional splits during low-activity periods                                            |
+|                          | • Consider time-based partitioning within region for easier management                                     |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Query Routing Risk**    | **Low-Medium Risk**                                                         | ██░░░░░░░░ Low-Medium |
+|                          | **Queries that route efficiently:**                                                                        |
+|                          | • Regional reports: `SELECT SUM(amount) FROM orders WHERE region = 'NA'`                                  |
+|                          |   → Routes to NA shards only (if region known)                                                            |
+|                          |                                                                                                           |
+|                          | • Customer history: `SELECT * FROM orders WHERE customer_id = ?`                                          |
+|                          |   → If region known (from customer profile), direct to specific region shards                              |
+|                          |   → If region unknown, query all regions (scatter-gather)                                                 |
+|                          |                                                                                                           |
+|                          | **Problematic queries:**                                                                                    |
+|                          | • Global reports: `SELECT SUM(amount) FROM orders WHERE order_date = '2024-01-01'`                        |
+|                          |   → Must query ALL region shards - scatter-gather                                                          |
+|                          |                                                                                                           |
+|                          | • Cross-region customer search: Rare but expensive                                                          |
+|                          |                                                                                                           |
+|                          | **Performance impact:**                                                                                     |
+|                          | • Regional queries are fast (parallel queries to region shards)                                            |
+|                          | • Global queries are slower (aggregate across all regions)                                                 |
+|                          | • Acceptable trade-off for most businesses                                                                 |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Data Skew Risk**        | **High Risk**                                                              | ████████░░ High |
+|                          | **Causes of skew:**                                                                                         |
+|                          | • **Natural economic imbalance** - NA and EU dominate global e-commerce                                    |
+|                          | • **Customer concentration** - Few customers generate most orders                                          |
+|                          | • **Seasonal variations** - Different peak seasons per region                                              |
+|                          |                                                                                                           |
+|                          | **Monitoring approach:**                                                                                     |
+|                          | • Track orders per region, revenue per region                                                               |
+|                          | • Monitor growth rates - fast-growing regions need capacity                                                |
+|                          | • Track per-customer order volume to identify power customers                                              |
+|                          | • Monitor shard storage and QPS per region                                                                 |
+|                          |                                                                                                           |
+|                          | **Mitigation strategies:**                                                                                  |
+|                          | • Dynamic shard allocation - more shards to high-growth regions                                            |
+|                          | • Customer segmentation - split power customers across shards within region                                |
+|                          | • Pre-aggregate regional totals for fast reporting                                                         |
+|--------------------------|---------------------------------------------------------------------------|---------------|
+| **Overall Risk Profile**  | **High** - Regional imbalance creates hot shards, rebalancing is complex                                   |
+=====================================================================================================================
+
+######### Comprehensive Risk Assessment Table
+=================================================================================================================================================
+| Dataset              | Hot Shards Risk | Rebalancing Risk | Query Routing Risk | Data Skew Risk | Overall Risk | Mitigation Strategies                                     |
+|----------------------|-----------------|------------------|---------------------|----------------|--------------|----------------------------------------------------------|
+| **User Accounts**    | Low             | Medium-High      | Medium              | Low            | Low-Medium   | • Use consistent hashing for rebalancing                  |
+|                      | █░░░░░░░░░      | ██████░░░░       | ████░░░░░░          | █░░░░░░░░░     |              | • Global secondary index for email/username               |
+|                      |                 |                  |                     |                |              | • Monitor power users, consider sub-sharding             |
+|----------------------|-----------------|------------------|---------------------|----------------|--------------|----------------------------------------------------------|
+| **Transactions**     | Medium          | Medium-High      | High                | Medium-High    | Medium-High  | • Monitor power users - sub-shard if needed               |
+|                      | ████░░░░░░      | ██████░░░░       | ████████░░          | ██████░░░░     |              | • Pre-aggregate for merchant analytics                    |
+|                      |                 |                  |                     |                |              | • Use distributed query engine for cross-shard queries    |
+|                      |                 |                  |                     |                |              | • Implement time-based partitioning within shards         |
+|----------------------|-----------------|------------------|---------------------|----------------|--------------|----------------------------------------------------------|
+| **IoT Sensor Data**  | High            | Very High        | Medium              | High           | High         | • Monitor device frequency - rebalance hot devices        |
+|                      | ████████░░      | ██████████       | ████░░░░░░          | ████████░░     |              | • Over-provision shards initially                         |
+|                      |                 |                  |                     |                |              | • Separate hot/warm/cold storage tiers                    |
+|                      |                 |                  |                     |                |              | • Use time-based rotation for data lifecycle              |
+|----------------------|-----------------|------------------|---------------------|----------------|--------------|----------------------------------------------------------|
+| **Orders by Region** | High            | Very High        | Low-Medium          | High           | High         | • Multiple shards per high-volume region                  |
+|                      | ████████░░      | ██████████       | ██░░░░░░░░          | ████████░░     |              | • Monitor regional growth - adjust shard allocation       |
+|                      |                 |                  |                     |                |              | • Cache global aggregates for cross-region reports        |
+|                      |                 |                  |                     |                |              | • Design for regional splits from the start               |
+=================================================================================================================================================
+
+#######STEP 4 ############################
+## When is Sharding Necessary?
+=====================================================================================================================
+| Condition                    | Description                                                                 | Indicator Thresholds                  |
+|------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
+| **Data Volume Exceeds**      | Dataset too large for single server's storage capacity                      | • > 1-2 TB on a single server         |
+| **Single Node Capacity**     |                                                                             | • Approaching disk capacity limits    |
+|                              |                                                                             | • Backup/restore times too long       |
+|------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
+| **Write Throughput**         | Write operations exceed what a single server can handle                     | • > 5,000 writes/second               |
+| **Exceeds Single Node**      |                                                                             | • CPU saturation on writes            |
+|                              |                                                                             | • Disk I/O at 100%                    |
+|------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
+| **Read Throughput**          | Read queries exceed single server's capacity even with read replicas        | • > 10,000 reads/second               |
+| **Exceeds Single Node**      |                                                                             | • Connection pool exhaustion          |
+|                              |                                                                             | • Query queue backing up              |
+|------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
+| **Geographic Distribution**  | Users分布在 different regions, need低延迟访问                               | • Global user base                     |
+|                              | Data sovereignty requirements (GDPR, etc.)                                  | • Regulatory data residency requirements|
+|------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
+| **Availability Requirements**| Need to survive regional outages                                            | • 99.99%+ availability targets        |
+|                              | Multi-data center redundancy required                                       | • Disaster recovery across regions    |
+|------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
+| **Alternatives to Sharding** | • **Vertical scaling** - Upgrade to bigger server (simpler but有限)         | Works until hardware limits           |
+|                              | • **Read replicas** - Scale reads only, not writes                         | Good for read-heavy workloads         |
+|                              | • **Caching** - Redis/Memcached for hot data                               | Reduces read load, not write          |
+|                              | • **Archiving** - Move old data to cold storage                            | Reduces active dataset size           |
+|                              | • **Partitioning** - Split tables within same DB (vertical)                | Limited scalability                   |
+|------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
+
+################# When is indexing alone sufficient?
+
+| **When Indexing Alone is Sufficient** |                                                                           |                                       |
+|                              | • Dataset fits on single server (< 1TB)                                     |                                       |
+|                              | • Read performance is the only bottleneck                                   |                                       |
+|                              | • Write volume is manageable (< 1,000 writes/sec)                          |                                       |
+|                              | • No geographic distribution requirements                                   |                                       |
+|                              | • Can achieve HA with replicas + failover                                   |                                       |
+|                              | • Query patterns are predictable and can be optimized                       |                                       |
+|                              |                                                                             |                                       |
+| **Limits of Indexing**       | • Doesn't help with write scaling                                           |                                       |
+|                              | • Doesn't reduce storage requirements                                       |                                       |
+|                              | • Can slow down writes (index maintenance)                                  |                                       |
+|                              | • Still limited by single server resources                                  |                                       |
+=====================================================================================================================
+
+
+#### Key Design Principles
+=====================================================================================================================
+| Principle                     | Description                                                               | Why It Matters                         |
+|-------------------------------|---------------------------------------------------------------------------|----------------------------------------|
+| **Choose Shard Key Wisely**   | The shard key is the most important decision. It determines:              | • Wrong choice = hot spots,            |
+|                               | • Data distribution                                                       |   uneven load, poor performance        |
+|                               | • Query routing efficiency                                                | • Hard to change later                 |
+|                               | • Scalability potential                                                   | • Impacts everything                   |
+|-------------------------------|---------------------------------------------------------------------------|----------------------------------------|
+| **Design for Shard Key in Queries** | Ensure most queries include the shard key                           | • Avoids scatter-gather                |
+|                               | Design application around shard key access                                 | • Predictable performance              |
+|                               |                                                                           | • Lower latency                        |
+|-------------------------------|---------------------------------------------------------------------------|----------------------------------------|
+| **Keep Related Data Together**| Data that is queried together should be in same shard                     | • Enables local joins                  |
+|                               | Examples: user + their orders, device + its readings                      | • Supports transactions                 |
+|                               |                                                                           | • Avoids cross-shard coordination      |
+|-------------------------------|---------------------------------------------------------------------------|----------------------------------------|
+| **Plan for Growth**           | Start with more shards than needed                                        | • Easier to scale out                  |
+|                               | Use consistent hashing for minimal rebalancing                            | • Avoids painful rebalancing later     |
+|                               | Monitor growth trends and capacity                                        | • Proactive vs reactive scaling        |
+|-------------------------------|---------------------------------------------------------------------------|----------------------------------------|
+| **Avoid Hot Spots**           | Don't use low-cardinality keys (status, region alone)                    | • Even load distribution               |
+|                               | Don't use monotonically increasing keys without hashing                   | • No single shard overwhelmed          |
+|                               | Monitor for power users and outliers                                      | • Consistent performance               |
+|-------------------------------|---------------------------------------------------------------------------|----------------------------------------|
+| **Design for Failure**        | Each shard should have replicas                                           | • High availability                     |
+|                               | Plan for cross-shard backup/restore                                       | • Disaster recovery                    |
+|                               | Test failure scenarios regularly                                          | • Confidence in system                 |
+|-------------------------------|---------------------------------------------------------------------------|----------------------------------------|
+| **Common Mistakes to Avoid**  |                                                                           |                                        |
+| • Sharding too early (unnecessary complexity)                            | • Start simple, shard when needed                                          |
+| • Poor shard key choice (hot spots, uneven distribution)                 | • Test with real data patterns                                             |
+| • Ignoring cross-shard queries                                           | • Design queries to include shard key                                      |
+| • No monitoring (blind to skew)                                          | • Monitor shard metrics from day one                                       |
+| • Assuming linear scalability without testing                            | • Load test before production                                              |
+| • Neglecting data migration plan                                         | • Plan rebalancing strategy upfront                                        |
+|-------------------------------|---------------------------------------------------------------------------|----------------------------------------|
+| **Critical Success Factors**  |                                                                           |                                        |
+| • Right shard key selection                                              | • 80% of success is choosing the right key                                 |
+| • Application awareness                                                  | • Code must be shard-aware                                                |
+| • Monitoring and alerting                                                | • Know when shards are unbalanced                                         |
+| • Operational maturity                                                   | • Backup/restore across shards                                            |
+| • Testing at scale                                                       | • Validate with production-like workloads                                 |
+=====================================================================================================================
+
+### Trade-offs Summary
+=====================================================================================================================
+| Trade-off                     | Sharding Approach                           | Alternative Approach                    |
+|-------------------------------|---------------------------------------------|-----------------------------------------|
+| **Performance vs Complexity** |                                           |                                         |
+| Performance                   | ✓ Excellent for single-shard queries        | ✗ Limited by single server              |
+|                              | ✓ Scales linearly with shards               |                                          |
+| Complexity                    | ✗ High - routing, rebalancing, ops         | ✓ Simple - standard DB setup            |
+|                              | ✗ Cross-shard queries complex               | ✓ Easy to manage                        |
+|-------------------------------|---------------------------------------------|-----------------------------------------|
+| **Scalability vs Consistency** |                                           |                                         |
+| Scalability                   | ✓ Near-linear scale-out                     | ✗ Vertical limits                       |
+|                              | ✓ Handle any data volume                     |                                          |
+| Consistency                   | ✗ Cross-shard transactions difficult       | ✓ ACID across all data                   |
+|                              | ✗ Eventual consistency often needed         | ✓ Strong consistency                    |
+|-------------------------------|---------------------------------------------|-----------------------------------------|
+| **Flexibility vs Simplicity** |                                           |                                         |
+| Flexibility                   | ✓ Can optimize per shard                     | ✗ One-size-fits-all                      |
+|                              | ✓ Independent scaling per workload          |                                          |
+| Simplicity                    | ✗ Complex to manage multiple shards         | ✓ Single system to manage                |
+|                              | ✗ Schema changes across all shards          | ✓ Easy backups, monitoring               |
+|-------------------------------|---------------------------------------------|-----------------------------------------|
+| **Cost vs Operational Overhead** |                                         |                                         |
+| Hardware Cost                 | ✗ More servers = higher cost                | ✓ Single server cheaper                  |
+|                              | ✓ Can use commodity hardware                | ✗ High-end hardware expensive           |
+| Operational Cost              | ✗ More complex to operate                   | ✓ Simple operations                      |
+|                              | ✗ Requires specialized skills               | ✓ Standard DBA skills                   |
+|-------------------------------|---------------------------------------------|-----------------------------------------|
+| **Query Performance Spectrum** |                                           |                                         |
+| Single-shard queries          | ✓ Excellent - fast, direct                  | ✓ Good - but limited by server          |
+| Multi-shard queries           | ✗ Slower - scatter-gather                   | ✓ Same as single-shard                  |
+| Aggregations                  | ✗ Complex - need distributed query engine   | ✓ Simple - SQL works                    |
+| Joins                        | ✗ Hard across shards, need denormalization | ✓ Easy within same DB                   |
+=====================================================================================================================
+
+
+
+
+
