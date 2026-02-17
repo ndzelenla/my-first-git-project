@@ -1,0 +1,360 @@
+--- scheduling_design
+
+
+## Cron Expression Answers
+
+| # | Requirement | Cron Expression | Explanation |
+|---|-------------|-----------------|-------------|
+| 1 | Daily at 2 AM | | |
+| 2 | Hourly at :15 | | |
+| 3 | Monday 6 AM | | |
+| 4 | 1st of month midnight | | |
+| 5 | Every 15 min | | |
+| 6 | Weekdays 8 AM | | |
+
+
+### Part 2: Pipeline Scheduling Design (25 minutes)
+## Pipelines to Schedule
+
++---------------------+---------------------+---------------------+---------------------+---------------------+
+| Pipeline            | Scheduling Strategy | Schedule/Trigger   | Justification       | Failure Handling    |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+| Pipeline 1:         | Dependency-aware    | Trigger: Source DB  | 1. Why this         | If it fails:        |
+| Nightly Warehouse   | (with time          | backup completion   | strategy? Backup    | Retry up to 3 times |
+| Refresh             | constraint)         | event               | completion time     | within 30 mins; if  |
+|                     |                     | Fallback: Poll      | varies (varies      | still failing,      |
+| What: Full reload   |                     | backup status       | around 1 AM), but   | trigger alert to    |
+| of 5 dimension      |                     | starting 12:30 AM   | data must be ready  | on-call engineer to |
+| tables from source  |                     | until confirmed     | by 6 AM. Event-     | investigate source  |
+| database            |                     |                     | based ensures we    | connectivity.       |
+|                     |                     |                     | start immediately   |                     |
+| Source: PostgreSQL  |                     |                     | when ready; time    | Safe to re-run?     |
+| (operational DB)    |                     |                     | window ensures we   | Yes - dimensions    |
+|                     |                     |                     | meet SLA.           | are fully reloaded  |
+| Dependency: Source  |                     |                     |                     | (truncate/insert    |
+| database backup     |                     |                     | 2. Why not          | pattern). Table     |
+| completes around    |                     |                     | alternatives? Cron  | locked during load  |
+| 1 AM (varies)       |                     |                     | alone would either  | to prevent          |
+|                     |                     |                     | miss data (if set   | inconsistent reads. |
+| Consumers: BI       |                     |                     | early) or add       |                     |
+| dashboards (need    |                     |                     | unnecessary latency |                     |
+| data by 6 AM)       |                     |                     | (if set late).      |                     |
+|                     |                     |                     | Pure event-based    |                     |
+| Volume: 500K rows   |                     |                     | without deadline    |                     |
+| total               |                     |                     | awareness could     |                     |
+|                     |                     |                     | risk 6 AM SLA if    |                     |
+|                     |                     |                     | backup delayed.     |                     |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+| Pipeline 2:         | Event-based         | Trigger: S3 object  | 1. Why this         | If it fails:        |
+| Hourly Clickstream  |                     | created event for   | strategy? Files     | Failed messages go  |
+| Aggregation         |                     | files matching      | arrive at variable  | to DLQ; reprocess   |
+|                     |                     | pattern             | times (:05-:10 past | when issue          |
+| What: Aggregate raw |                     | `clickstream/raw/   | hour). Event-based  | resolved. Data can  |
+| click events into   |                     | hour=*/`            | ensures processing  | be backfilled from  |
+| hourly session      |                     |                     | starts immediately  | raw S3 files.       |
+| summaries           |                     |                     | when data           |                     |
+|                     |                     |                     | available.          | Safe to re-run?     |
+| Source: S3 bucket   |                     |                     |                     | Yes - aggregation   |
+| (Kinesis Firehose   |                     |                     | 2. Why not          | uses upsert logic   |
+| writes hourly       |                     |                     | alternatives? Cron  | (session_id + hour) |
+| files)              |                     |                     | would either:       | so re-running       |
+|                     |                     |                     | process too early   | updates existing    |
+| Dependency: Files   |                     |                     | and miss data       | records rather than |
+| appear at :05 to    |                     |                     | (need 10-min        | creating            |
+| :10 past the hour   |                     |                     | buffer), or add     | duplicates.         |
+| (not exact)         |                     |                     | unnecessary latency |                     |
+|                     |                     |                     | if set              |                     |
+| Consumers: Product  |                     |                     | conservatively.     |                     |
+| team dashboard      |                     |                     |                     |                     |
+|                     |                     |                     |                     |                     |
+| Volume: 2M events/  |                     |                     |                     |                     |
+| hour                |                     |                     |                     |                     |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+| Pipeline 3:         | Dependency-aware    | Trigger: First of   | 1. Why this         | If it fails:        |
+| Financial Close     | (sequential DAG)    | month at 12:01 AM   | strategy? Steps are | Pause pipeline,     |
+| Pipeline            |                     | Dependencies: Step  | strictly sequential | notify finance      |
+|                     |                     | N waits for Step    | with data passing   | team, manual        |
+| What: Multi-step    |                     | N-1 completion      | between them. Must  | intervention likely |
+| monthly             |                     |                     | complete by 5th but | needed due to       |
+| reconciliation:     |                     |                     | internal            | financial data      |
+| extract → validate  |                     |                     | dependencies are    | sensitivity.        |
+| → calculate →       |                     |                     | the primary         | Maintain checkpoint |
+| report              |                     |                     | constraint.         | tables to resume    |
+|                     |                     |                     |                     | from last           |
+| Steps: Extract      |                     |                     | 2. Why not          | successful step.    |
+| accounts → Validate |                     |                     | alternatives?       |                     |
+| balances →          |                     |                     | Couldn't run        | Safe to re-run?     |
+| Calculate interest  |                     |                     | independent jobs on | Partially -         |
+| → Generate report   |                     |                     | cron - each step    | individual steps    |
+| → Email to CFO      |                     |                     | requires previous   | can be re-run if    |
+|                     |                     |                     | output. Event       | idempotent (e.g.,   |
+| Dependency: Each    |                     |                     | triggers would need | recalculation       |
+| step depends on     |                     |                     | custom logic to     | safe), but complete |
+| the previous        |                     |                     | pass data between   | re-run requires     |
+|                     |                     |                     | steps.              | validation with     |
+| Timing: Must        |                     |                     |                     | finance team.       |
+| complete by 5th of  |                     |                     |                     |                     |
+| month               |                     |                     |                     |                     |
+|                     |                     |                     |                     |                     |
+| Volume: 200K        |                     |                     |                     |                     |
+| accounts            |                     |                     |                     |                     |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+| Pipeline 4:         | Event-based         | Trigger: SFTP file  | 1. Why this         | If it fails:        |
+| Partner File        |                     | watcher detects     | strategy? Partner   | File remains in     |
+| Ingestion           |                     | new CSV files       | uploads at          | staging area; retry |
+|                     |                     | matching partner    | unpredictable times | with exponential    |
+| What: Load CSV      |                     | pattern             | (could be any       | backoff (5min,      |
+| files from partner  |                     |                     | hour/day). No       | 15min, 1hr). Alert  |
+| SFTP                |                     |                     | business value in   | ops if all retries  |
+|                     |                     |                     | polling.            | fail.               |
+| Source: SFTP server |                     |                     |                     |                     |
+| (partner uploads    |                     |                     | 2. Why not          | Safe to re-run?     |
+| files at            |                     |                     | alternatives? Cron  | Yes - move file to  |
+| unpredictable       |                     |                     | would waste         | `/processed` after  |
+| times)              |                     |                     | resources polling   | successful load.    |
+|                     |                     |                     | an SFTP server      | If file still in    |
+| Dependency: File    |                     |                     | that's idle 90%+ of | staging, it hasn't  |
+| must exist before   |                     |                     | time. Partner has   | been processed.     |
+| processing          |                     |                     | no fixed schedule   | Use file hash to    |
+|                     |                     |                     | so time-based       | detect duplicates.  |
+| Consumers: Business |                     |                     | impossible.         |                     |
+| operations team     |                     |                     |                     |                     |
+|                     |                     |                     |                     |                     |
+| Volume: 10K-50K     |                     |                     |                     |                     |
+| rows per file       |                     |                     |                     |                     |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+| Pipeline 5:         | Dependency-aware    | Trigger: Pipeline 1 | 1. Why this         | If it fails:        |
+| ML Feature Pipeline |                     | completion event    | strategy? Explicit  | Retry logic built   |
+|                     |                     |                     | dependency on       | into feature        |
+| What: Build feature |                     |                     | warehouse refresh   | computation steps;  |
+| tables for ML       |                     |                     | (Pipeline 1) for    | if persistent       |
+| models              |                     |                     | source data. Must   | failure, fall back  |
+|                     |                     |                     | finish by 7 AM.     | to previous day's   |
+| Dependency:         |                     |                     |                     | features with       |
+| Requires warehouse  |                     |                     | 2. Why not          | warning in model    |
+| refresh (Pipeline   |                     |                     | alternatives? Cron  | output.             |
+| 1) to complete      |                     |                     | would need          |                     |
+| first               |                     |                     | conservative        | Safe to re-run?     |
+|                     |                     |                     | estimate (e.g.,     | Yes - features are  |
+| Consumers: ML       |                     |                     | 3 AM) adding        | computed with date  |
+| scoring jobs        |                     |                     | unnecessary latency | partition, so       |
+|                     |                     |                     | or risk running     | re-running updates  |
+| Timing: Must        |                     |                     | before data ready.  | the partition for   |
+| complete before     |                     |                     |                     | current day.        |
+| scoring job at      |                     |                     |                     |                     |
+| 7 AM                |                     |                     |                     |                     |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+| Pipeline 6:         | Dependency-aware    | Trigger: Subscribe  | 1. Why this         | If it fails:        |
+| Data Quality Checks | (event cascade)     | to completion       | strategy? Must run  | Send alert to data  |
+|                     |                     | events from         | immediately after   | engineering team    |
+| What: Run           |                     | Pipelines 1-5       | each pipeline       | with failed check   |
+| validation queries  |                     |                     | completes to        | details. Quarantine |
+| on warehouse tables |                     |                     | detect issues       | affected tables if  |
+| after each load     |                     |                     | early. Each         | checks are          |
+|                     |                     |                     | pipeline has        | critical.           |
+| Dependency: Must    |                     |                     | different           |                     |
+| run AFTER each      |                     |                     | completion timing.  | Safe to re-run?     |
+| pipeline above      |                     |                     |                     | Yes - checks are    |
+| completes           |                     |                     | 2. Why not          | read-only queries;  |
+|                     |                     |                     | alternatives? Cron  | can be re-run       |
+| Consumers: Data     |                     |                     | would need          | anytime. Results    |
+| engineering team    |                     |                     | separate schedules  | stored in audit     |
+| alerts              |                     |                     | for each pipeline   | table with          |
+|                     |                     |                     | and couldn't adapt  | timestamps to       |
+| Timing: Within 30   |                     |                     | to varying          | track history.      |
+| minutes of each     |                     |                     | completion times.   |                     |
+| pipeline completion |                     |                     | Would add latency   |                     |
+|                     |                     |                     | between pipeline    |                     |
+|                     |                     |                     | completion and      |                     |
+|                     |                     |                     | validation.         |                     |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+
+## Part 3: Anti-Pattern Identification (10 minutes)
+## Identify What's Wrong
+
++---------------------+---------------------+---------------------+---------------------+
+| Setup               | What's wrong        | Risk                | Fix                 |
++---------------------+---------------------+---------------------+---------------------+
+| Setup 1:            | Fixed cron chain    | Pipeline B runs at  | Dependency-aware    |
+| Pipeline A: Extract | with hardcoded       | 2:00 AM regardless  | scheduling with     |
+| data from API       | time gaps that      | of whether Pipeline | completion events:  |
+| Cron: 0 1 * * *     | don't account for   | A actually          |                     |
+| (1:00 AM)           | varying execution   | finished at 1:00 AM | Trigger:            |
+|                     | times. Assumes each | or 1:45 AM. If A    | Pipeline A          |
+| Pipeline B:         | step takes exactly  | runs long, B starts | completion event    |
+| Transform           | 1 hour.             | before data ready   | → Trigger B         |
+| extracted data      |                     | (failure) or data   | Pipeline B          |
+| Cron: 0 2 * * *     |                     | is stale. If A      | completion event    |
+| (2:00 AM)           |                     | finishes early, B   | → Trigger C         |
+|                     |                     | wastes 45+ minutes  |                     |
+| Pipeline C: Load    |                     | of idle time.       | Or use a single     |
+| transformed data    |                     |                     | orchestrated DAG    |
+| Cron: 0 3 * * *     |                     |                     | with step           |
+| (3:00 AM)           |                     |                     | dependencies.       |
++---------------------+---------------------+---------------------+---------------------+
+| Setup 2:            | High-frequency      | Compute waste:      | Event-based         |
+| Pipeline: Load      | polling (every 5     | 288 checks/month    | scheduling:         |
+| partner file        | minutes) for a      | for a single file   |                     |
+|                     | low-frequency event | = 86%+ wasted runs  | Trigger: SFTP file  |
+| Schedule: Every 5   | (once per week).    |                     | upload event        |
+| minutes, check if   |                     | API/connection      | detected            |
+| file exists,        |                     | costs: 288 SFTP     |                     |
+| process if found    |                     | connections/month   | If event not        |
+|                     |                     | when only 4 needed  | available, reduce   |
+| Problem: File is    |                     | (72x overhead)      | polling frequency   |
+| uploaded once per   |                     |                     | to hourly or daily  |
+| week                |                     | Alert fatigue:      | and add file        |
+|                     |                     | "no file found"     | existence check     |
+|                     |                     | logs overwhelm      | only when expected  |
+|                     |                     | monitoring          | (e.g., during       |
+|                     |                     |                     | business hours).    |
++---------------------+---------------------+---------------------+---------------------+
+| Setup 3:            | Time-based          | Pipeline reads      | Dependency-aware    |
+| Pipeline: Nightly   | schedule conflicts  | database during     | with status check:  |
+| warehouse refresh   | with upstream       | active backup →     |                     |
+|                     | dependency without  | inconsistent data   | Trigger: Poll       |
+| Schedule: 0 0 * * * | coordination.       | (tables in middle   | backup completion   |
+| (midnight)          |                     | of restore).        | status starting     |
+|                     | Pipeline starts at  |                     | 11:30 PM, run       |
+| Note: Source        | midnight but        | Pipeline fails due  | pipeline immediately|
+| database backup     | backup runs 11PM-   | to locked tables/   | when backup         |
+| runs from 11 PM to  | 1AM → 100% overlap  | connections during  | confirmed.          |
+| 1 AM                | with backup window  | backup.             |                     |
+|                     | for first hour.     |                     | Add fallback: if    |
+|                     |                     | Data corruption     | backup not complete |
+|                     |                     | risk if reading     | by 1:30 AM, alert   |
+|                     |                     | partially restored  | and delay to next   |
+|                     |                     | tables.             | night or use        |
+|                     |                     |                     | replica for reads.  |
++---------------------+---------------------+---------------------+---------------------+
+
+### Draw a text-based DAG showing how all 6 pipelines connect:
+
+## Pipeline Dependency DAG
+
+                              +------------------------+
+                              |   EXTERNAL DEPENDENCY  |
+                              |   Source DB Backup     |
+                              |   (completion event)   |
+                              +-----------+------------+
+                                          |
+                                          v
++-------------------+         +-----------+------------+
+|  PIPELINE 1       |<--------+   Trigger: Backup done |
+|  Nightly Warehouse|         +------------------------+
+|  Refresh          |
+|  (Dim Tables)     |
++--------+----------+
+         |
+         | (completes)
+         v
++--------+----------+         +------------------------+
+|  BRANCH           +-------->|  PIPELINE 6            |
+|  Decision Point   |         |  Data Quality Checks   |
+|                   |         |  (runs after each)     |
++--------+----------+         +------------------------+
+         |
+         | (depends on P1)
+         v
++--------+----------+         +------------------------+
+|  PIPELINE 5       +-------->|  PIPELINE 6            |
+|  ML Feature       |         |  Data Quality Checks   |
+|  Tables           |         +------------------------+
++--------+----------+
+         |
+         | (feeds)
+         v
++--------+----------+
+|  EXTERNAL:        |
+|  ML Scoring Job   |
+|  (7:00 AM)        |
++-------------------+
+
++---------------------------+    +------------------------+
+|  EXTERNAL TRIGGER         |    |  EXTERNAL TRIGGER       |
+|  S3 File Arrival          |    |  SFTP File Upload       |
+|  (:05-:10 past hour)      |    |  (unpredictable)        |
++------------+--------------+    +------------+-----------+
+             |                                |
+             v                                v
++------------+--------------+    +------------+-----------+
+|  PIPELINE 2               |    |  PIPELINE 4             |
+|  Hourly Clickstream       |    |  Partner File Ingestion |
+|  Aggregation              |    |  (CSV Load)             |
++------------+--------------+    +------------+-----------+
+             |                                |
+             | (completes)                    | (completes)
+             v                                v
++------------+--------------+    +------------+-----------+
+|  PIPELINE 6               |    |  PIPELINE 6             |
+|  Data Quality Checks      |    |  Data Quality Checks    |
++---------------------------+    +-------------------------+
+
++---------------------------+    
+|  TIMER TRIGGER            |    
+|  First of month, 12:01 AM |    
++------------+--------------+    
+             |                    
+             v                    
++------------+--------------+    
+|  PIPELINE 3 - FINANCIAL   |    
+|  CLOSE (Sequential Steps) |    
+|                           |    
+|  +---------------------+  |    
+|  | Step 1: Extract     |  |    
+|  | Accounts            |  |    
+|  +---------+-----------+  |    
+|            |               |    
+|            v               |    
+|  +---------+-----------+  |    
+|  | Step 2: Validate    |  |    
+|  | Balances            |  |    
+|  +---------+-----------+  |    
+|            |               |    
+|            v               |    
+|  +---------+-----------+  |    
+|  | Step 3: Calculate   |  |    
+|  | Interest            |  |    
+|  +---------+-----------+  |    
+|            |               |    
+|            v               |    
+|  +---------+-----------+  |    
+|  | Step 4: Generate    |  |    
+|  | Report              |  |    
+|  +---------+-----------+  |    
+|            |               |    
+|            v               |    
+|  +---------+-----------+  |    
+|  | Step 5: Email to    |  |    
+|  | CFO                 |  |    
+|  +---------------------+  |    
++------------+--------------+    
+             |                    
+             | (completes)         
+             v                    
++------------+--------------+    
+|  PIPELINE 6               |    
+|  Data Quality Checks      |    
++---------------------------+    
+
++---------------------------------------------------+
+|                 LEGEND                            |
+|---------------------------------------------------|
+|  [Pipeline Box]  = Data pipeline                   |
+|  (Step n)        = Sequential step within pipeline |
+|  |               = Dependency flow                  |
+|  v               = Direction of dependency         |
+|  +-------------+ = External trigger/sink           |
++---------------------------------------------------+
+
++---------------------------------------------------+
+|              DEPENDENCY SUMMARY                   |
+|---------------------------------------------------|
+| Pipeline 1: Depends on Source DB Backup           |
+| Pipeline 2: Depends on S3 File Arrival            |
+| Pipeline 3: Self-contained DAG (5 steps)          |
+| Pipeline 4: Depends on SFTP File Upload           |
+| Pipeline 5: Depends on Pipeline 1                  |
+| Pipeline 6: Depends on Pipelines 1,2,3,4,5         |
+| ML Scoring: Depends on Pipeline 5                  |
++---------------------------------------------------+
